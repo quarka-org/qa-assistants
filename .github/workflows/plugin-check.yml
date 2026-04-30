@@ -1,0 +1,31 @@
+name: Plugin Check
+
+# QA Assistants 本体（src/qa-heatmap-analytics/）を WordPress.org の Plugin Check に通す。
+# 詳細: https://github.com/WordPress/plugin-check-action
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/qa-heatmap-analytics/**'
+      - '.github/workflows/plugin-check.yml'
+  pull_request:
+    paths:
+      - 'src/qa-heatmap-analytics/**'
+      - '.github/workflows/plugin-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Plugin Check
+        uses: WordPress/plugin-check-action@v1
+        with:
+          build-dir: './src/qa-heatmap-analytics'
