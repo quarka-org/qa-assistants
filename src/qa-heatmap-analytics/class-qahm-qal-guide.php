@@ -20,70 +20,17 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 			}
 		}
 
-		$features_detail = $this->load_features_from_manifest( $version );
 		return array(
-			'version'         => $version,
-			'api_update'      => defined( 'QAHM_API_UPDATE' ) ? QAHM_API_UPDATE : '',
-			'timestamp'       => gmdate( 'Y-m-d\TH:i:s\Z' ),
-			'plugin_version'  => QAHM_PLUGIN_VERSION,
-			'features'        => $this->project_features_flat( $features_detail ),
-			'features_detail' => $features_detail,
-			'sites'           => $this->build_sites_array(),
-			'documentation'   => array(
-				'source'   => "https://github.com/quarka-org/docs.qazero.com/tree/main/docs/developer-manual/api/{$version}/ai",
-				'format'   => 'mixed',
+			'version'        => $version,
+			'timestamp'      => gmdate( 'Y-m-d\TH:i:s\Z' ),
+			'plugin_version' => QAHM_PLUGIN_VERSION,
+			'sites'          => $this->build_sites_array(),
+			'documentation'  => array(
+				'source'   => "https://github.com/quarka-org/docs.qazero.com/tree/main/docs/developer-manual/api/{$version}",
+				'format'   => 'markdown',
 				'sections' => $this->build_sections_array( $version ),
 			),
 		);
-	}
-
-	/**
-	 * Load the rich `features` map ({enabled, since}) from the QAL validation
-	 * manifest for the given version.
-	 *
-	 * The manifest is the single source of truth: YAML under
-	 * `src/core/yaml/qal-validation-{version}.yaml`, compiled to a PHP
-	 * array file by `scripts/build-manifest.php`.
-	 *
-	 * @param string $version API version (YYYY-MM-DD).
-	 * @return array Map of feature name => {enabled: bool, since?: string}.
-	 *               Empty array if the manifest is missing or has no features.
-	 */
-	private function load_features_from_manifest( $version ) {
-		$manifest_file = dirname( __FILE__ ) . '/yaml/qal-validation-' . $version . '.php';
-
-		if ( ! file_exists( $manifest_file ) ) {
-			return array();
-		}
-
-		$manifest = include $manifest_file;
-
-		if ( ! is_array( $manifest ) || empty( $manifest['features'] ) || ! is_array( $manifest['features'] ) ) {
-			return array();
-		}
-
-		return $manifest['features'];
-	}
-
-	/**
-	 * Project the rich features map ({enabled, since}) back to the legacy
-	 * flat {feature_name: bool} shape for backward compatibility. Entries
-	 * that are already plain booleans (from a legacy manifest) are passed
-	 * through unchanged.
-	 *
-	 * @param array $features_detail Rich features map.
-	 * @return array Flat {feature_name: bool} map.
-	 */
-	private function project_features_flat( $features_detail ) {
-		$flat = array();
-		foreach ( $features_detail as $name => $entry ) {
-			if ( is_array( $entry ) ) {
-				$flat[ $name ] = ! empty( $entry['enabled'] );
-			} else {
-				$flat[ $name ] = (bool) $entry;
-			}
-		}
-		return $flat;
 	}
 
 	private function normalize_version( $version ) {
@@ -134,12 +81,7 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 				continue;
 			}
 
-			if ( strlen( $dir ) === 10
-				&& $dir[4] === '-' && $dir[7] === '-'
-				&& ctype_digit( substr( $dir, 0, 4 ) )
-				&& ctype_digit( substr( $dir, 5, 2 ) )
-				&& ctype_digit( substr( $dir, 8, 2 ) )
-			) {
+			if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $dir ) ) {
 				$versions[] = $dir;
 			}
 		}
@@ -158,7 +100,7 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 		$versions = $this->get_available_versions();
 
 		if ( empty( $versions ) ) {
-			return defined( 'QAHM_API_VERSION' ) ? QAHM_API_VERSION : '2025-10-20';
+			return '2025-10-20';
 		}
 
 		return end( $versions );
@@ -173,7 +115,7 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 		$versions = $this->get_available_versions();
 
 		if ( empty( $versions ) ) {
-			return defined( 'QAHM_API_VERSION' ) ? QAHM_API_VERSION : '2025-10-20';
+			return '2025-10-20';
 		}
 
 		return reset( $versions );
@@ -275,14 +217,7 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 
 	private function is_cached( $version ) {
 		$cache_dir = $this->get_cache_dir( $version );
-		if ( ! file_exists( $cache_dir ) || ! is_dir( $cache_dir ) ) {
-			return false;
-		}
-		// Guard against stale caches left over from an older file layout
-		// (pre-2026-04-14 the guide cached index.md / endpoints.md / materials.md / qal.md).
-		// We require at least the current AI-facing README.md to be present; otherwise
-		// fetch_from_github() must run to populate the new file set.
-		return file_exists( $cache_dir . 'README.md' );
+		return file_exists( $cache_dir ) && is_dir( $cache_dir );
 	}
 
 	private function fetch_from_github( $version ) {
@@ -315,11 +250,8 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 			);
 		}
 
-		// AI-facing subset only. Human-readable pages are intentionally NOT fetched;
-		// the /guide endpoint is optimized for AI / MCP consumers who only need
-		// the machine-readable spec (YAML) plus a concise instruction README.
-		$files    = array( 'README.md', 'materials.yaml', 'qal-validation.yaml' );
-		$base_url = "https://raw.githubusercontent.com/quarka-org/docs.qazero.com/main/docs/developer-manual/api/{$version}/ai/";
+		$files    = array( 'index.md', 'endpoints.md', 'materials.md', 'qal.md' );
+		$base_url = "https://raw.githubusercontent.com/quarka-org/docs.qazero.com/main/docs/developer-manual/api/{$version}/";
 
 		foreach ( $files as $file ) {
 			$url      = $base_url . $file;
@@ -374,24 +306,22 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 		$cache_dir = $this->get_cache_dir( $version );
 		$sections  = array();
 
-		// Section layout for the AI-facing guide: one concise instruction
-		// README, then the two machine-readable YAML specs. Clients SHOULD
-		// treat README as prose, and materials / qal-validation as YAML.
 		$file_mappings = array(
-			'README.md'            => array(
-				'category' => 'instructions',
-				'format'   => 'markdown',
-				'title'    => __( 'AI Instructions (how to build a QAL query)', 'qa-heatmap-analytics' ),
+			'index.md'     => array(
+				'category' => 'overview',
+				'title'    => __( 'QA Platform API ガイド', 'qa-heatmap-analytics' ),
 			),
-			'materials.yaml'       => array(
-				'category' => 'spec',
-				'format'   => 'yaml',
-				'title'    => __( 'Materials Manifest (machine-readable)', 'qa-heatmap-analytics' ),
+			'endpoints.md' => array(
+				'category' => 'reference',
+				'title'    => __( 'API エンドポイント', 'qa-heatmap-analytics' ),
 			),
-			'qal-validation.yaml'  => array(
-				'category' => 'spec',
-				'format'   => 'yaml',
-				'title'    => __( 'QAL Validation Manifest (machine-readable)', 'qa-heatmap-analytics' ),
+			'materials.md' => array(
+				'category' => 'reference',
+				'title'    => __( 'データ構造', 'qa-heatmap-analytics' ),
+			),
+			'qal.md'       => array(
+				'category' => 'reference',
+				'title'    => __( 'QAL クエリ言語', 'qa-heatmap-analytics' ),
 			),
 		);
 
@@ -408,7 +338,6 @@ class QAHM_Qal_Guide extends QAHM_File_Base {
 
 			$sections[] = array(
 				'category' => $meta['category'],
-				'format'   => $meta['format'],
 				'file'     => $file,
 				'title'    => $meta['title'],
 				'content'  => $content,

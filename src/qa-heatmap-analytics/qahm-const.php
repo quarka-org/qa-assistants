@@ -75,33 +75,11 @@ if ( $main_file && file_exists( $main_file ) ) {
 const QAHM_NAME          = 'qahm';
 const QAHM_OPTION_PREFIX = QAHM_NAME . '_';
 
-/**
- * QA Platform REST API バージョン / アップデート
- *
- * 2層バージョニング（docs/qal/10-rest-api-specification.md §5 参照）:
- *   - QAHM_API_VERSION : URL に現れる API バージョン（破壊的変更でのみ bump、24ヶ月サポート）
- *   - QAHM_API_UPDATE  : 同一 version 内の後方互換な機能追加日。/guide レスポンスに
- *                        `api_update` として返却され、クライアントが新機能の有無を判定する。
- *
- * 新しい機能（filter の新演算子 / 新マテリアル / 新 calc 関数 / view 拡張 等）を
- * 追加したタイミングで QAHM_API_UPDATE を **その日の日付** に bump すること。
- * 単なるリファクタや typo 修正では bump しない。
- *
- * 参考: docs/handover/T55-developers-doc-api-update.md, /qal-update スキル
- */
-const QAHM_API_VERSION = '2025-10-20';
-const QAHM_API_UPDATE  = '2026-04-17';
-
 const QAHM_DEBUG_LEVEL = array(
 	'release' => 0,
 	'staging' => 1,
 	'debug'   => 2,
 );
-
-// GA4 backfill: 夜間cronで遡及取得する月数（現在月の前月から数えてNヶ月）
-// GA4 Data API 無料枠の遡及実績上限は14ヶ月。安全マージンで13。
-// T60: 毎晩 check_file ベースで未取得月のみ補完する（状態分岐なし）。
-const QAHM_GA4_BACKFILL_MONTHS = 13;
 
 const QAHM_CONFIG_GOALMAX = 10;
 

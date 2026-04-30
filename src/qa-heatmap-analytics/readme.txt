@@ -23,12 +23,18 @@ QA Assistants makes discovering your site’s stories simple, visual, and a litt
 == Features ==
 
 ### Assistants — your data-driven companions to explore your site
-Each Assistant offers a unique way to understand your site.  
-From traffic overviews to social engagement or content insights, they highlight what truly matters — in plain words you can grasp.  
-More Assistants will keep joining, each bringing a new perspective to your data.
 
-**New:** The built-in **Page Analysis Assistant** lets you view pageviews, key metrics, and device-specific heatmaps directly from the page you're browsing — a lightweight, chatbot-style helper for logged-in admins.
+Assistants help you understand your site through data — in a clear and easy-to-understand way.
+Each Assistant focuses on a different perspective, such as traffic trends, content performance, or user behavior.  
+More Assistants will continue to be added over time, expanding what you can explore and understand.
 
+#### In-dashboard Assistants
+Assistants can be downloaded from the official site and appear in the plugin dashboard.  
+They provide deeper insights and reports based on accumulated data.
+
+#### On-page Assistant
+The built-in **Page Analysis Assistant** appears directly on your site pages.  
+While browsing, you can quickly check pageviews, key metrics, and device-specific heatmaps — a lightweight assistant for logged-in admins.
 
 ### Heatmaps & Session Replays — see how visitors behave
 Visualize how people interact with your site: where they click, scroll, and pause.  
@@ -129,6 +135,14 @@ Stay tuned for updates on the [official site](https://quarka.org/en-assistants/)
 
 
 == Changelog ==
+
+= 5.2.0.0 =
+*Release Date: April 24, 2026*
+
+- UI improvements across the admin screens
+- Performance and internal improvements
+- Minor bug fixes
+
 
 = 5.1.3.0 =
 *Release Date: January 19, 2026*

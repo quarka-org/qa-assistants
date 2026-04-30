@@ -1,11 +1,11 @@
 .qa-table th {
   background-color: #3d7b99;
   color: #fff;
-  font-weight: 400;
+  font-weight: normal;
 }
 
 .qa-table th:hover {
-  filter: brightness(0.92);
+  background-color: #326680;
 }
 
 .qa-sort-desc, .qa-sort-asc {
@@ -38,10 +38,15 @@
 }
 
 .qa-filter-add {
-  background-color: #3d7b99;
+  background: linear-gradient(270deg, #3BAFDA 0%, #3d7b99 100%);
   color: #fff;
+  border: 1.5px solid #3d7b99;
 }
 
-.qa-filter-add:hover {
-  background-color: #326680;
-}
+.qa-filter-clear {
+  border: 1px solid #3BAFDA;
+  background: linear-gradient(180deg, #3BAFDA 0%, #3d7b99 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}/*# sourceMappingURL=qa-table-custom-wp.css.map */

@@ -20,11 +20,6 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 	private static $error_msg = array();
 	private $localize_ary;
 
-	// admin_init から create_html へ受け渡す GA4 設定保存通知（{message:string,status:'success'|'error'} or null）
-	private $ga4_notice = null;
-	// admin_init から create_html へ受け渡す OAuth 復元タブ（'tab_google' or null）
-	private $pending_tab = null;
-
 	/**
 	 * コンストラクタ
 	 */
@@ -38,7 +33,6 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 		// AJAX関数の登録
 		add_action( 'wp_ajax_qahm_ajax_save_plugin_config', array( $this, 'ajax_save_plugin_config' ) );
 		add_action( 'wp_ajax_qahm_ajax_save_measurement_config', array( $this, 'ajax_save_measurement_config' ) );
-		add_action( 'wp_ajax_qahm_get_ga4_properties', array( $this, 'ajax_get_ga4_properties' ) );
 	}
 
 	// 管理画面の初期化
@@ -57,30 +51,12 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 		$tracking_id_raw = isset( $_GET['tracking_id'] ) ? $this->sanitize_tracking_id( wp_unslash( $_GET['tracking_id'] ) ) : 'all';
 		$tracking_id     = $this->get_safe_tracking_id( $tracking_id_raw );
 
-		// Google OAuth コールバック時の復元
-		// Google は redirect_uri に query を勝手に付与できないため、
-		// コールバック URL には tracking_id が載らず、admin_init は tracking_id='all' で呼ばれる。
-		// POST で認証開始した直前の tracking_id を transient に積んでおき、
-		// ?code=XXX が付いた戻り時だけ復元する（後段で init_for_admin が fetchAccessTokenWithAuthCode を実行してtokenを保存する）。
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		if ( $tracking_id === 'all' && isset( $_GET['code'] ) ) {
-			$pending_key = 'qahm_google_oauth_pending_' . get_current_user_id();
-			$pending     = get_transient( $pending_key );
-			if ( is_array( $pending ) && ! empty( $pending['tracking_id'] ) ) {
-				$tracking_id = $this->get_safe_tracking_id( $pending['tracking_id'] );
-				if ( ! empty( $pending['tab'] ) ) {
-					$this->pending_tab = sanitize_key( $pending['tab'] );
-				}
-				delete_transient( $pending_key );
-			}
-		}
-
 		// ALL選択時は初期化をスキップ（create_htmlでメッセージ表示）
 		if ( $tracking_id === 'all' ) {
 			return;
 		}
 
-		$scope   = array( 'https://www.googleapis.com/auth/webmasters.readonly', 'https://www.googleapis.com/auth/analytics.readonly' );
+		$scope = array( 'https://www.googleapis.com/auth/webmasters.readonly' );
 
 		$sitemanage = $qahm_data_api->get_sitemanage();
 		if ( $sitemanage ) {
@@ -111,60 +87,12 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 
 					$qahm_google_api->set_credentials( $client_id, $client_secret, null, $tracking_id );
 					$qahm_google_api->set_tracking_id( $tracking_id, $url );
-
-					// Google redirect_uri には tracking_id を含められないため、
-					// コールバック時に復元できるよう直前の tracking_id を transient に保存する。
-					// 将来的にタブ復元等にも拡張できるよう配列で持つ。
-					set_transient(
-						'qahm_google_oauth_pending_' . get_current_user_id(),
-						array(
-							'tracking_id' => $tracking_id,
-							'tab'         => 'tab_google',
-						),
-						10 * MINUTE_IN_SECONDS
-					);
-
 					$qahm_google_api->init_for_admin(
 						'Google API Integration',
 						$scope,
 						admin_url( 'admin.php?page=qahm-config' ),
 						true
 					);
-				}
-
-				// GA4プロパティ設定の保存
-				if ( 'save_ga4_settings' === $form_type ) {
-					check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
-					$ga4_property_id   = isset( $_POST['ga4_property_id'] ) ? sanitize_text_field( wp_unslash( $_POST['ga4_property_id'] ) ) : '';
-					$ga4_property_name = isset( $_POST['ga4_property_name'] ) ? sanitize_text_field( wp_unslash( $_POST['ga4_property_name'] ) ) : '';
-					if ( empty( $ga4_property_id ) ) {
-						$ga4_property_id = isset( $_POST['ga4_property_id_manual'] ) ? sanitize_text_field( wp_unslash( $_POST['ga4_property_id_manual'] ) ) : '';
-						// 手入力経由は displayName が無いので name はクリア
-						$ga4_property_name = '';
-					}
-					// プロパティIDは数字のみに制限（"properties/XXXXXXXX" → "XXXXXXXX"）
-					if ( strpos( $ga4_property_id, 'properties/' ) === 0 ) {
-						$ga4_property_id = substr( $ga4_property_id, 11 );
-					}
-					if ( ctype_digit( $ga4_property_id ) && strlen( $ga4_property_id ) > 0 ) {
-						$ga4_settings = get_option( 'qahm_ga4_settings', array() );
-						$ga4_settings[ $tracking_id ] = array(
-							'ga4_property_id'   => $ga4_property_id,
-							'ga4_property_name' => $ga4_property_name,
-						);
-						update_option( 'qahm_ga4_settings', $ga4_settings );
-						$this->ga4_notice  = array(
-							'message' => __( 'GA4 property saved.', 'qa-heatmap-analytics' ),
-							'status'  => 'success',
-						);
-						$this->pending_tab = 'tab_google';
-					} else {
-						$this->ga4_notice  = array(
-							'message' => __( 'Invalid GA4 property ID. Please enter a numeric value.', 'qa-heatmap-analytics' ),
-							'status'  => 'error',
-						);
-						$this->pending_tab = 'tab_google';
-					}
 				}
 			} else {
 				// 通常表示
@@ -472,33 +400,6 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 			$access_token = $credentials['token']['access_token'];
 		}
 
-		// GA4 プロパティ設定（タブ選択ロジックでも使う）
-		$ga4_settings_all       = get_option( 'qahm_ga4_settings', array() );
-		$saved_ga4_property_id   = isset( $ga4_settings_all[ $tracking_id ]['ga4_property_id'] ) ? $ga4_settings_all[ $tracking_id ]['ga4_property_id'] : '';
-		$saved_ga4_property_name = isset( $ga4_settings_all[ $tracking_id ]['ga4_property_name'] ) ? $ga4_settings_all[ $tracking_id ]['ga4_property_name'] : '';
-
-		// デフォルトタブ決定（OAuth戻り・GA4未設定・URLパラメータ・通知ありで tab_google を強制）
-		if ( QAHM_TYPE === QAHM_TYPE_WP ) {
-			$default_tab = 'tab_plugin';
-		} else {
-			$default_tab = 'tab_measurement';
-		}
-		// google_is_redirect の値はあとで announce 用に再読込されるので、ここでは消費しない
-		$was_oauth_redirect = (bool) $this->wrap_get_option( 'google_is_redirect' );
-		$tab_param          = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if (
-			( QAHM_TYPE === QAHM_TYPE_ZERO ) &&
-			(
-				$this->pending_tab === 'tab_google' ||
-				$was_oauth_redirect ||
-				'tab_google' === $tab_param ||
-				$this->ga4_notice !== null ||
-				( $qahm_google_api->is_auth() && empty( $saved_ga4_property_id ) )
-			)
-		) {
-			$default_tab = 'tab_google';
-		}
-
 		?>
 
 		<div id="<?php echo esc_attr( basename( __FILE__, '.php' ) ); ?>" class="qahm-admin-page">
@@ -534,9 +435,15 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 						<div class="tabs">
 
 					<div class="qa-zero-tab">
-					<?php if ( QAHM_TYPE === QAHM_TYPE_WP ) : ?>
-						<span class="qa-zero-tab__item<?php echo ( 'tab_plugin' === $default_tab ) ? ' qa-zero-tab__item--active' : ''; ?>" data-tab="tab_plugin_content"><span class="qa-zero-tab__icon"><i class="fas fa-cog"></i> </span><?php esc_html_e( 'General Settings', 'qa-heatmap-analytics' ); ?></span>
-					<?php endif; ?>
+					<?php
+						$default_tab = ( QAHM_TYPE === QAHM_TYPE_ZERO ) ? 'tab_measurement' : 'tab_goal';
+					if ( QAHM_TYPE === QAHM_TYPE_WP ) {
+						$default_tab = 'tab_plugin';
+						?>
+							<span class="qa-zero-tab__item qa-zero-tab__item--active" data-tab="tab_plugin_content"><span class="qa-zero-tab__icon"><i class="fas fa-cog"></i> </span><?php esc_html_e( 'General Settings', 'qa-heatmap-analytics' ); ?></span>
+							<?php
+					}
+					?>
 					<?php if ( QAHM_TYPE === QAHM_TYPE_ZERO ) : ?>
 					<span class="qa-zero-tab__item<?php echo ( 'tab_measurement' === $default_tab ) ? ' qa-zero-tab__item--active' : ''; ?>" data-tab="tab_measurement_content"><span class="qa-zero-tab__icon"><i class="fas fa-tachometer-alt"></i> </span><?php esc_html_e( 'Measurement', 'qa-heatmap-analytics' ); ?></span>
 					<?php endif; ?>
@@ -544,7 +451,7 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 					<?php if ( false ) : // サイトの属性を非表示 ?>
 					<span class="qa-zero-tab__item" data-tab="tab_site_attr_content"><span class="qa-zero-tab__icon"><i class="far fa-address-card"></i> </span><?php esc_html_e( 'Site Profile', 'qa-heatmap-analytics' ); ?></span>
 					<?php endif; ?>
-					<span class="qa-zero-tab__item<?php echo ( 'tab_google' === $default_tab ) ? ' qa-zero-tab__item--active' : ''; ?>" data-tab="tab_google_content"><span class="qa-zero-tab__icon"><i class="fab fa-google"></i> </span><?php esc_html_e( 'Google Integration', 'qa-heatmap-analytics' ); ?></span>
+					<span class="qa-zero-tab__item" data-tab="tab_google_content"><span class="qa-zero-tab__icon"><i class="fab fa-google"></i> </span><?php esc_html_e( 'Google Integration', 'qa-heatmap-analytics' ); ?></span>
 					</div>
 
 					<?php
@@ -662,11 +569,11 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 		?>
 					<div class="qahm-config__tab-content<?php echo esc_attr( ( 'tab_goal' === $default_tab ) ? ' qahm-config__tab-content--active' : '' ); ?>" id="tab_goal_content">
 						<div class="qahm-config__tab-content-description">
-							<p class="qahm-config__tab-description"><?php esc_html_e( 'ゴールを設定して、サイトの成果を計測しましょう。', 'qa-heatmap-analytics' ); ?><br>
+							<p class="qahm-config__tab-description"><?php esc_html_e( 'Set goals to understand key actions on your site.', 'qa-heatmap-analytics' ); ?><br>
 							<?php if ( QAHM_TYPE === QAHM_TYPE_WP ) { ?>
-							<strong><?php esc_html_e( '基本的なゴール指標はオーディエンスに表示されます。詳細なゴールレポートを見るには、詳細モードを有効にしてください。', 'qa-heatmap-analytics' ); ?></strong><br>
+							<strong><?php esc_html_e( 'Basic goal metrics are shown in the Audience Report. To view detailed goal reports, please enable Advanced Mode.', 'qa-heatmap-analytics' ); ?></strong><br>
 							<?php } ?>
-							<?php esc_html_e( 'ゴールはいつでも変更できます。収集済みのデータには影響しません。', 'qa-heatmap-analytics' ); ?></p>
+							<?php esc_html_e( 'You can update your goals at any time. Changes apply to past data as well.', 'qa-heatmap-analytics' ); ?></p>
 							  
 							<div id="step2">
 
@@ -951,7 +858,7 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 		 * "Google API"
 		 */
 		?>
-						<div class="qahm-config__tab-content<?php echo esc_attr( ( 'tab_google' === $default_tab ) ? ' qahm-config__tab-content--active' : '' ); ?>" id="tab_google_content">
+						<div class="qahm-config__tab-content" id="tab_google_content">
 							<?php if ( QAHM_TYPE === QAHM_TYPE_WP ) { ?>
 								<p><em>Coming soon</em></p>
 								<p>Google Integration will be available in a future release.</p>
@@ -975,7 +882,7 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 												</label>
 											</th>
 											<td>
-												<input name="client_id" type="text" id="client_id" value="<?php echo esc_attr( isset( $credentials['client_id'] ) ? $credentials['client_id'] : '' ); ?>" class="regular-text"<?php echo esc_attr( $form_google_disabled ); ?>>
+												<input name="client_id" type="text" id="client_id" value="<?php echo esc_attr( $qahm_google_api->get_client_id() ); ?>" class="regular-text"<?php echo esc_attr( $form_google_disabled ); ?>>
 											</td>
 										</tr>
 
@@ -986,7 +893,7 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 												</label>
 											</th>
 											<td>
-												<input name="client_secret" type="text" id="client_secret" value="<?php echo esc_attr( isset( $credentials['client_secret'] ) ? $credentials['client_secret'] : '' ); ?>" class="regular-text"<?php echo esc_attr( $form_google_disabled ); ?>>
+												<input name="client_secret" type="text" id="client_secret" value="<?php echo esc_attr( $qahm_google_api->get_client_secret() ); ?>" class="regular-text"<?php echo esc_attr( $form_google_disabled ); ?>>
 												<?php
 												if ( $form_google_disabled !== '' ) {
 													echo '<span id="client_info_disabled_text" class="qahm-config__unlock-link">&nbsp;' . esc_html( __( 'Unlock the button\'s disabled', 'qa-heatmap-analytics' ) ) . '</span>';
@@ -1014,198 +921,21 @@ class QAHM_Admin_Page_Config extends QAHM_Admin_Page_Base {
 											</td>
 										</tr>
 										
+										<tr>
+											<td colspan="2">
+												<p class="qahm-config__auth-status">
+													<?php
+													if ( $access_token ) {
+														echo esc_html__( 'Authentication is complete and the token has been obtained. If the integration isn\'t working properly, please click the "Authenticate" button again to re-authenticate.', 'qa-heatmap-analytics' );
+													}
+													?>
+												</p>
+											</td>
+										</tr>
 									</tbody>
 								</table>
 							</form>
-							<?php
-							if ( $access_token ) {
-								$this->print_qa_announce_html(
-									esc_html__( 'Authentication is complete and the token has been obtained. If the integration isn\'t working properly, please click the "Authenticate" button again to re-authenticate.', 'qa-heatmap-analytics' ),
-									'success'
-								);
-							}
-							?>
-
-<?php
-/** --------------------------------
- * GA4 Property Selection
- *
- * 連携状態を「PHP宣言的な2状態描画」で出し分ける:
- *   - $saved_ga4_property_id があれば「連携済み」表示（disabled入力 + 再連携リンク）
- *   - 無ければ「未連携」表示（プロパティ取得ボタン + ドロップダウン + 手入力フォールバック）
- *
- * 通知は admin_init で $this->ga4_notice にセットされたものを print_qa_announce_html() で1経路に統一。
- */
-?>
-<hr style="margin: 30px 0;">
-<h3><?php esc_html_e( 'GA4 Property Settings', 'qa-heatmap-analytics' ); ?></h3>
-<p class="qahm-config__tab-description">
-	<?php esc_html_e( 'Select the GA4 property to retrieve attribute data (age, gender, region).', 'qa-heatmap-analytics' ); ?>
-	<br>
-	<small><?php esc_html_e( 'Requires: GA4 Admin API and GA4 Data API must be enabled in Google Cloud Console.', 'qa-heatmap-analytics' ); ?></small>
-</p>
-
-<?php
-if ( is_array( $this->ga4_notice ) && ! empty( $this->ga4_notice['message'] ) ) {
-	$this->print_qa_announce_html(
-		esc_html( $this->ga4_notice['message'] ),
-		isset( $this->ga4_notice['status'] ) ? $this->ga4_notice['status'] : 'success'
-	);
-}
-?>
-
-<?php if ( $saved_ga4_property_id ) : ?>
-	<?php
-	$display_name = $saved_ga4_property_name !== ''
-		? $saved_ga4_property_name
-		: __( '(name unavailable — reconnect to fetch)', 'qa-heatmap-analytics' );
-	?>
-	<form method="post" id="ga4_settings_form">
-		<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME, false ); ?>
-		<input type="hidden" name="form_type" value="save_ga4_settings">
-		<input type="hidden" id="ga4_property_name" name="ga4_property_name" value="<?php echo esc_attr( $saved_ga4_property_name ); ?>">
-		<table class="form-table">
-			<tbody>
-				<tr>
-					<th scope="row">
-						<label><?php esc_html_e( 'Connected GA4 Property', 'qa-heatmap-analytics' ); ?></label>
-					</th>
-					<td>
-						<p style="margin: 0 0 6px 0;">
-							<strong style="font-size: 1.1em;"><?php echo esc_html( $saved_ga4_property_id ); ?></strong>
-							&nbsp;—&nbsp;
-							<span><?php echo esc_html( $display_name ); ?></span>
-						</p>
-						<input type="text" id="ga4_property_id_manual" name="ga4_property_id_manual" value="<?php echo esc_attr( $saved_ga4_property_id ); ?>" class="regular-text" disabled>
-						<button type="button" id="ga4_reconnect_link" class="button button-link" style="margin-left: 8px;">
-							<?php esc_html_e( 'Connect a different GA4 property', 'qa-heatmap-analytics' ); ?>
-						</button>
-					</td>
-				</tr>
-				<tr id="ga4_reconnect_picker" style="display: none;">
-					<th scope="row"></th>
-					<td>
-						<button type="button" id="ga4_fetch_properties" class="button button-secondary">
-							<?php esc_html_e( 'Select GA4 Property', 'qa-heatmap-analytics' ); ?>
-						</button>
-						<span id="ga4_fetch_status" style="margin-left: 10px;"></span>
-						<br><br>
-						<select id="ga4_property_select" name="ga4_property_id" style="min-width: 400px; display: none;">
-							<option value=""><?php esc_html_e( '-- Select a property --', 'qa-heatmap-analytics' ); ?></option>
-						</select>
-					</td>
-				</tr>
-			</tbody>
-		</table>
-		<p class="submit">
-			<input type="submit" class="button button-primary" value="<?php esc_attr_e( 'Save GA4 Settings', 'qa-heatmap-analytics' ); ?>" disabled id="ga4_save_btn">
-		</p>
-	</form>
-<?php else : ?>
-	<form method="post" id="ga4_settings_form">
-		<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME, false ); ?>
-		<input type="hidden" name="form_type" value="save_ga4_settings">
-		<input type="hidden" id="ga4_property_name" name="ga4_property_name" value="">
-		<table class="form-table">
-			<tbody>
-				<tr>
-					<th scope="row">
-						<label><?php esc_html_e( 'GA4 Property', 'qa-heatmap-analytics' ); ?></label>
-					</th>
-					<td>
-						<button type="button" id="ga4_fetch_properties" class="button button-secondary">
-							<?php esc_html_e( 'Select GA4 Property', 'qa-heatmap-analytics' ); ?>
-						</button>
-						<span id="ga4_fetch_status" style="margin-left: 10px;"></span>
-						<br><br>
-						<select id="ga4_property_select" name="ga4_property_id" style="min-width: 400px; display: none;">
-							<option value=""><?php esc_html_e( '-- Select a property --', 'qa-heatmap-analytics' ); ?></option>
-						</select>
-						<br><br>
-						<label for="ga4_property_id_manual"><?php esc_html_e( 'Or enter Property ID manually (fallback):', 'qa-heatmap-analytics' ); ?></label>
-						<input type="text" id="ga4_property_id_manual" name="ga4_property_id_manual" value="" placeholder="e.g. 123456789" style="width: 200px;">
-					</td>
-				</tr>
-			</tbody>
-		</table>
-		<p class="submit">
-			<input type="submit" class="button button-primary" value="<?php esc_attr_e( 'Save GA4 Settings', 'qa-heatmap-analytics' ); ?>">
-		</p>
-	</form>
-<?php endif; ?>
-
-<script>
-(function() {
-	var fetchBtn      = document.getElementById('ga4_fetch_properties');
-	var selectEl      = document.getElementById('ga4_property_select');
-	var statusEl      = document.getElementById('ga4_fetch_status');
-	var manualInput   = document.getElementById('ga4_property_id_manual');
-	var nameInput     = document.getElementById('ga4_property_name');
-	var reconnectBtn  = document.getElementById('ga4_reconnect_link');
-	var reconnectRow  = document.getElementById('ga4_reconnect_picker');
-	var saveBtn       = document.getElementById('ga4_save_btn');
-
-	// 「別のGA4プロパティと連携する」: 入力欄の disabled を外して選択UIを開く
-	if (reconnectBtn && reconnectRow) {
-		reconnectBtn.addEventListener('click', function() {
-			reconnectRow.style.display = '';
-			if (manualInput) { manualInput.disabled = false; }
-			if (saveBtn)     { saveBtn.disabled     = false; }
-			// 再取得ボタンを連動押下するのは過剰なのでしない
-		});
-	}
-
-	// ドロップダウン選択時: 手入力欄と hidden displayName を同期更新
-	// 注: textContent は ID を括弧書きで含むため、表示用に保存するのは data-display-name
-	if (selectEl) {
-		selectEl.addEventListener('change', function() {
-			var opt = selectEl.options[selectEl.selectedIndex];
-			if (manualInput) { manualInput.value = selectEl.value || ''; }
-			if (nameInput)   { nameInput.value   = opt ? (opt.dataset.displayName || '') : ''; }
-		});
-	}
-
-	if (fetchBtn) {
-		fetchBtn.addEventListener('click', function() {
-			statusEl.textContent = '<?php echo esc_js( __( 'Loading...', 'qa-heatmap-analytics' ) ); ?>';
-			var formData = new FormData();
-			formData.append('action', 'qahm_get_ga4_properties');
-			formData.append('nonce', '<?php echo esc_js( wp_create_nonce( self::NONCE_ACTION ) ); ?>');
-			formData.append('tracking_id', '<?php echo esc_js( $tracking_id ); ?>');
-
-			fetch(ajaxurl, { method: 'POST', body: formData })
-				.then(function(r) { return r.json(); })
-				.then(function(data) {
-					if (data.success && data.data && data.data.accountSummaries) {
-						selectEl.innerHTML = '<option value=""><?php echo esc_js( __( '-- Select a property --', 'qa-heatmap-analytics' ) ); ?></option>';
-						data.data.accountSummaries.forEach(function(account) {
-							if (account.propertySummaries) {
-								account.propertySummaries.forEach(function(prop) {
-									var propId = prop.property ? prop.property.replace('properties/', '') : '';
-									var displayName = (account.displayName || '') + ' / ' + (prop.displayName || '');
-									var opt = document.createElement('option');
-									opt.value = propId;
-									opt.dataset.displayName = displayName;
-									opt.textContent = displayName + ' (' + propId + ')';
-									selectEl.appendChild(opt);
-								});
-							}
-						});
-						selectEl.style.display = 'block';
-						statusEl.textContent = '';
-					} else {
-						statusEl.textContent = data.data && data.data.message ? data.data.message : 'Error';
-					}
-				})
-				.catch(function(e) {
-					statusEl.textContent = 'Request failed: ' + e.message;
-				});
-		});
-	}
-})();
-</script>
-
-						   <?php } ?>
+							<?php } ?>
 						</div><!-- endof #tab_google_content -->
 
 		<?php
@@ -1334,55 +1064,6 @@ if ( is_array( $this->ga4_notice ) && ! empty( $this->ga4_notice['message'] ) ) 
 		} else {
 			return false;
 		}
-	}
-
-	/**
-	 * GA4プロパティ一覧をAJAXで取得
-	 */
-	public function ajax_get_ga4_properties() {
-		check_ajax_referer( self::NONCE_ACTION, 'nonce' );
-
-		global $qahm_google_api, $qahm_data_api;
-
-		$tracking_id = isset( $_POST['tracking_id'] ) ? sanitize_text_field( wp_unslash( $_POST['tracking_id'] ) ) : '';
-		if ( empty( $tracking_id ) ) {
-			wp_send_json_error( array( 'message' => 'tracking_id is required' ) );
-		}
-
-		$sitemanage = $qahm_data_api->get_sitemanage();
-		$url = null;
-		if ( $sitemanage ) {
-			foreach ( $sitemanage as $site ) {
-				if ( $tracking_id === $site['tracking_id'] ) {
-					$url = $site['url'];
-					break;
-				}
-			}
-		}
-
-		if ( ! $url ) {
-			wp_send_json_error( array( 'message' => 'tracking_id not found' ) );
-		}
-
-		$qahm_google_api->set_tracking_id( $tracking_id, $url );
-		$scope = array( 'https://www.googleapis.com/auth/webmasters.readonly', 'https://www.googleapis.com/auth/analytics.readonly' );
-		$is_init = $qahm_google_api->init_for_admin(
-			'Google API Integration',
-			$scope,
-			admin_url( 'admin.php?page=qahm-config' )
-		);
-
-		if ( ! $is_init ) {
-			wp_send_json_error( array( 'message' => 'Google API authentication failed. Please re-authenticate.' ) );
-		}
-
-		$result = $qahm_google_api->get_ga4_account_summaries();
-		if ( $result === null || isset( $result['error'] ) ) {
-			$err_msg = isset( $result['error'] ) ? $result['error'] : 'Unknown error';
-			wp_send_json_error( array( 'message' => 'GA4 Admin API error: ' . ( is_array( $err_msg ) ? json_encode( $err_msg ) : $err_msg ) ) );
-		}
-
-		wp_send_json_success( $result );
 	}
 
 	/**

@@ -138,41 +138,59 @@ qahmz.deleteCookie = function(cookie_name){
 
 }
 
-// T49: qa_id_zはHttpOnly Cookie — JSからは読めない。サーバーが$_COOKIEで直接読む
-// getQaidfromCookie は廃止（互換性のため空実装を残す）
 qahmz.getQaidfromCookie = function(){
-	return { value: '', is_new_user: 0 };
+
+	let qa_id_obj = { value: '', is_new_user: 0 };
+
+	let cookie_ary = qahmz.getCookieArray();
+
+	if ( cookie_ary["qa_id_z"] ){
+		qa_id_obj.value = cookie_ary["qa_id_z"];
+		qa_id_obj.is_new_user = 0; //新規ユーザでない
+	} else {
+		qa_id_obj.is_new_user = 1; //新規ユーザ
+	}
+
+	return qa_id_obj;
+
 }
 
-// T49: qa_id_zはサーバーがSet-Cookieで発行する。JS側のCookie書き込みは不要
 qahmz.setQaid = function(){
+
+	if( !qahmz.qa_id ){
+		return false;
+	}
+	qahmz.setCookie("qa_id_z",qahmz.qa_id);
+
 	return true;
+
 }
 
-// T49: Cookie管理はサーバーサイドに統一。JSはcookieConsentObjectの有無だけ判定する
+//状況に応じてCookieを更新する
+//戻り値：Cookie拒否かどうか
 qahmz.updateQaidCookie = function() {
 
 	if( !qahmz.cookieMode ){ //Cookie同意モード以外
+		//何もしない
 		qahmz.isRejectCookie = false;
 		return;
 	}
 
-	//同意モード: cookieConsentObjectが設定されていなければCookie拒否
-	if( !qahmz.cookieConsentObject ){
+	//同意モード
+	if( !qahmz.cookieConsentObject ){ //同意タグがなければすべてのcookie消去
+		qahmz.deleteCookie("qa_id_z");
+		qahmz.deleteCookie("qa_cookieConsent");
 		qahmz.isRejectCookie = true;
 		return;
 	}
 
-	// T49: qa_cookieConsentはHttpOnly — サーバーが$_COOKIEで判定してis_consentedを返す
-	// isConsentedが未確定(undefined)の場合はfalseにしてサーバーに委ねる
-	// （サーバー側で$_COOKIEを見て最終判断する）
-	if( qahmz.isConsented === true ){
+	if( qahmz.getCookie("qa_cookieConsent") == "true" ){
+		qahmz.setQaid();
 		qahmz.isRejectCookie = false;
-	}else if( qahmz.isConsented === false ){
-		qahmz.isRejectCookie = true;
 	}else{
-		// 初回（initレスポンス前）: サーバーが$_COOKIEで判断するのでfalseで送る
-		qahmz.isRejectCookie = false;
+		qahmz.deleteCookie("qa_id_z");
+		qahmz.deleteCookie("qa_cookieConsent");
+		qahmz.isRejectCookie = true;
 	}
 
 }
@@ -195,38 +213,23 @@ qahmz.init = function() {
 
 		qahmz.xhr = new XMLHttpRequest();
 
-		// T49: qa_idはPOSTに含めない（サーバーが$_COOKIEから直接読む）
+		//qa_idの取得
+		let qa_id_obj = qahmz.getQaidfromCookie();
+
 		let sendStr = 'action=init_session_data';
 		sendStr += '&tracking_hash=' + encodeURIComponent( qahmz.tracking_hash );
 		sendStr += '&url=' + encodeURIComponent( location.href );
 		sendStr += '&title=' + encodeURIComponent( document.title );
 		sendStr += '&referrer=' + encodeURIComponent( document.referrer );
 		sendStr += '&country=' + encodeURIComponent( (navigator.userLanguage||navigator.browserLanguage||navigator.language).substr(0,2) );
+		if( qa_id_obj.value != '' ){
+			sendStr += '&qa_id=' + encodeURIComponent( qa_id_obj.value );
+		}
+		sendStr += '&is_new_user=' + encodeURIComponent( qa_id_obj.is_new_user );
 		sendStr += '&tracking_id=' + encodeURIComponent( qahmz.tracking_id );
 		sendStr += '&is_reject=' + encodeURIComponent( qahmz.isRejectCookie );
 
-		// T50: original_id取得（Cookie or JS変数）
-		if ( qahmz.originalIdSourceType && qahmz.originalIdSourceName ) {
-			var oidVal = '';
-			if ( qahmz.originalIdSourceType === 'cookie' ) {
-				var cookies = qahmz.getCookieArray();
-				if ( cookies[ qahmz.originalIdSourceName ] !== undefined ) {
-					oidVal = cookies[ qahmz.originalIdSourceName ];
-				}
-			} else if ( qahmz.originalIdSourceType === 'js_var' ) {
-				var jsVal = window[ qahmz.originalIdSourceName ];
-				if ( jsVal !== undefined && jsVal !== null ) {
-					oidVal = String( jsVal );
-				}
-			}
-			if ( oidVal !== '' ) {
-				sendStr += '&original_id=' + encodeURIComponent( oidVal );
-			}
-		}
-
 		qahmz.xhr.open( 'POST', qahmz.ajaxurl, true );
-		// T49: init_session_dataのみwithCredentials（HttpOnly Cookieの送受信に必要）
-		qahmz.xhr.withCredentials = true;
 
 		qahmz.xhr.onload = function () {
 			let data;
@@ -245,9 +248,7 @@ qahmz.init = function() {
 				qahmz.readersBodyIndex = data.readers_body_index;
 				qahmz.rawName          = data.raw_name;
 				qahmz.qa_id            = data.qa_id;
-				// T49: サーバーからの同意状態を反映
-				qahmz.isConsented      = !!data.is_consented;
-				if(!qahmz.cookieMode){
+				if(!qahmz.cookieMode){ //同意モード以外なら有無を言わさずqa_idをセット
 					qahmz.setQaid();
 				}else{
 					qahmz.updateQaidCookie();
@@ -1263,57 +1264,12 @@ qahmz.datalayereventpushed = function(eventname, data) {
 //公開メソッド
 var qahmz_pub = qahmz_pub || {};
 
-// T49: HttpOnly Cookie対応 — サーバーサイドでCookie操作
 qahmz_pub.cookieConsent = function(agree) {
-	if( !qahmz.ajaxurl ){ return; }
 	if(agree){
-		// 同意: サーバーにCookie発行を依頼
-		qahmz.set_cookieConsent && qahmz.set_cookieConsent();
+		qahmz.setCookie("qa_cookieConsent",agree);
 	}else{
-		// 拒否: サーバーにCookie削除を依頼
-		var xhr = new XMLHttpRequest();
-		var sendStr = 'action=cookie_consent_revoke';
-		sendStr += '&tracking_hash=' + encodeURIComponent( qahmz.tracking_hash || '' );
-		sendStr += '&url=' + encodeURIComponent( location.href );
-		sendStr += '&tracking_id=' + encodeURIComponent( qahmz.tracking_id || '' );
-		xhr.open( 'POST', qahmz.ajaxurl, true );
-		xhr.withCredentials = true;
-		xhr.setRequestHeader( 'Content-Type', 'application/x-www-form-urlencoded' );
-		xhr.onload = function(){
-			qahmz.isConsented = false;
-			qahmz.isRejectCookie = true;
-		};
-		xhr.send( sendStr );
+		qahmz.deleteCookie("qa_id_z");
+		qahmz.deleteCookie("qa_cookieConsent");
 	}
-}
-
-qahmz.liveView = qahmz.liveView || {};
-
-qahmz.liveView.init = function() {
-	var params = new URLSearchParams(location.search);
-	var token = params.get('qa_lv');
-
-	var storageKey = 'qa_live_view_' + location.pathname;
-	var hasStoredData = sessionStorage.getItem(storageKey) !== null;
-
-	if (!token && !hasStoredData) {
-		return;
-	}
-
-	var script = document.createElement('script');
-	script.src = qahmz.ajaxurl.replace(/qahm-ajax\.php.*$/, 'js/live-view.js');
-	script.onload = function() {
-		qahmz.liveView.start(token);
-	};
-	script.onerror = function() {
-		console.error('QA Live View: Failed to load live-view.js');
-	};
-	document.head.appendChild(script);
-};
-
-if (document.readyState === 'loading') {
-	document.addEventListener('DOMContentLoaded', qahmz.liveView.init);
-} else {
-	qahmz.liveView.init();
 }
 
