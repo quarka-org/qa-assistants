@@ -35,7 +35,7 @@ QA Assistants へのフィードバックをご検討いただきありがとう
 
 ## アシスタントプラグイン作成についての質問
 
-`templates/qa-assistant-starter/` と `docs/specs/` が用意されています。Claude Code を使うと、`CLAUDE.md` を自動で読み込んで作成支援してくれます。
+`assistant-plugins/qa-assistant-starter/` と `docs/specs/` が用意されています。Claude Code を使うと、`CLAUDE.md` を自動で読み込んで作成支援してくれます。
 
 - インストール手順: [docs/getting-started.md](docs/getting-started.md)
 - 作成手順: [docs/how-to-build.md](docs/how-to-build.md)

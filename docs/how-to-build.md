@@ -21,7 +21,7 @@ cd qa-assistants
    ↓
 3. Claude Code が構成を提案 → 確認
    ↓
-4. 4 ファイルを生成（templates/ をコピーして編集）
+4. 4 ファイルを生成（assistant-plugins/qa-assistant-starter/ をコピーして編集）
    ↓
 5. 自分の WordPress プラグインディレクトリに配置 → 有効化 → 動作確認
 ```
@@ -78,7 +78,7 @@ Claude Code が以下のように提案してきます:
 
 ## ステップ 4: 4 ファイルが生成される
 
-Claude Code が以下を生成（`templates/qa-assistant-starter/` をコピーして編集）:
+Claude Code が以下を生成（`assistant-plugins/qa-assistant-starter/` をコピーして編集）:
 
 ```
 qa-assistant-{name}/

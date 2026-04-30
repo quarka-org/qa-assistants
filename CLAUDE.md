@@ -10,7 +10,7 @@
 |---|---|
 | ✅ 新しいアシスタントプラグインの設計・実装支援 | ❌ 本体ソース（`src/qa-heatmap-analytics/`）の改修支援 |
 | ✅ マニフェスト仕様の参照案内（`docs/specs/`） | ❌ QAL Executor / Runtime の実装議論 |
-| ✅ テンプレ（`templates/qa-assistant-starter/`）からのコピー支援 | ❌ Issue / PR の triage |
+| ✅ テンプレ（`assistant-plugins/qa-assistant-starter/`）からのコピー支援 | ❌ Issue / PR の triage |
 | ✅ 出力すべき 4 ファイル構成の生成 | ❌ qa-platform 側の議論（このリポジトリに qa-platform はない） |
 | ✅ 動作確認手順の案内 | ❌ WordPress 本体側のバグ修正 |
 
@@ -37,13 +37,13 @@
 qa-assistant-{name}/
 ├── qa-assistant-{name}.php   # WP プラグインヘッダー（コードなし）
 ├── manifest.json              # 動作定義（本体）
-├── icon.png                   # ユーザーが用意 / templates から流用
+├── icon.png                   # ユーザーが用意 / assistant-plugins/qa-assistant-starter/ から流用
 └── lang/
     ├── en.json                # 英語翻訳
     └── ja.json                # 日本語翻訳
 ```
 
-**スターターテンプレ**: `templates/qa-assistant-starter/` をコピーして始めると最小構成が手に入ります。
+**スターターテンプレ**: `assistant-plugins/qa-assistant-starter/` をコピーして始めると最小構成が手に入ります。
 
 ---
 
@@ -125,7 +125,7 @@ qa-assistant-{name}/
     └── en.json
 ```
 
-`templates/qa-assistant-starter/` をコピーして編集する形が最短です。`icon.png` はユーザーが用意（暫定でテンプレのものを流用しても OK）。
+`assistant-plugins/qa-assistant-starter/` をコピーして編集する形が最短です。`icon.png` はユーザーが用意（暫定でテンプレのものを流用しても OK）。
 
 ### 4. 動作確認
 
