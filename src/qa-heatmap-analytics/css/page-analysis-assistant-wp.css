@@ -1,0 +1,336 @@
+@charset "UTF-8";
+/**
+ * QAHM Page Analysis Assistant Styles (Core)
+ * 
+ * Styles for page analysis assistant UI.
+ * This file will be compiled to page-analysis-assistant-wp.css for QA Advisor.
+ * 
+ * @since 1.0.0
+ */
+/* フローティングボタン */
+#qahm-page-analysis-assistant-button {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #0073aa;
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+}
+#qahm-page-analysis-assistant-button:hover:not(:disabled) {
+  background: #005a87;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  transform: scale(1.05);
+}
+#qahm-page-analysis-assistant-button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+#qahm-page-analysis-assistant-button.active {
+  background: #005a87;
+}
+
+.qahm-chatbot-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.qahm-chatbot-label {
+  font-size: 14px;
+}
+
+/* 会話ウィンドウ */
+#qahm-page-analysis-assistant-window {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 9998;
+  width: 380px;
+  height: 570px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  transform-origin: bottom right;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+#qahm-page-analysis-assistant-window.hidden {
+  opacity: 0;
+  transform: scale(0);
+  pointer-events: none;
+}
+#qahm-page-analysis-assistant-window {
+  /* ヘッダー */
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #0073aa;
+  color: #fff;
+  border-radius: 12px 12px 0 0;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-close {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-close:hover {
+  opacity: 0.8;
+}
+#qahm-page-analysis-assistant-window {
+  /* コンテンツエリア */
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  max-height: 500px;
+}
+#qahm-page-analysis-assistant-window {
+  /* チャット入力エリア（デモ版） */
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-input-area {
+  display: none;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-input {
+  flex: 1;
+  padding: 12px 50px 12px 16px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 24px;
+  font-size: 14px;
+  color: #9ca3af;
+  outline: none;
+  cursor: not-allowed;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-input:disabled {
+  opacity: 1;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-input::placeholder {
+  color: #9ca3af;
+  font-size: 14px;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-send-button {
+  position: absolute;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: #E0E0E0;
+  border-radius: 50%;
+  color: #666666;
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-send-button:disabled {
+  opacity: 1;
+}
+#qahm-page-analysis-assistant-window .qahm-chatbot-send-button svg {
+  width: 20px;
+  height: 20px;
+}
+#qahm-page-analysis-assistant-window {
+  /* 汎用会話フレームワークのスタイル */
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-message {
+  margin-bottom: 16px;
+  line-height: 1.6;
+  color: #333;
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  max-width: 80%;
+  width: fit-content;
+  font-size: 14px;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-message.qahm-conversation-user {
+  padding: 10px 14px;
+  background: #e3f2fd;
+  color: #1565c0;
+  text-align: right;
+  align-self: flex-end;
+  margin-left: auto;
+  max-width: 70%;
+  font-weight: 500;
+  font-size: 14px;
+  animation: fadeInUserMessage 0.3s ease-in;
+  border: none;
+}
+@keyframes fadeInUserMessage {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-command-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-command-button {
+  padding: 12px 16px;
+  background: #E3F2FD;
+  color: #0073aa;
+  border: 1px solid #90CAF9;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: none;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-command-button:hover {
+  background: #BBDEFB;
+  border-color: #64B5F6;
+  box-shadow: 0 2px 4px rgba(0, 115, 170, 0.15);
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-command-button:active {
+  background: #90CAF9;
+  transform: scale(0.98);
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-command-button:focus {
+  outline: 2px solid #0073aa;
+  outline-offset: 2px;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-command-button:disabled {
+  background: #F5F5F5;
+  color: #BDBDBD;
+  border-color: #E0E0E0;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-container {
+  margin: 32px 0;
+  overflow-x: auto;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-title {
+  font-weight: 700;
+  margin-bottom: 16px;
+  font-size: 18px;
+  color: #0F172A;
+  padding: 8px 0 8px 12px;
+  border-left: 4px solid #0073aa;
+}
+#qahm-page-analysis-assistant-window {
+  /* データテーブルスタイル */
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table th, #qahm-page-analysis-assistant-window .qahm-conversation-data-table td {
+  padding: 14px 12px;
+  text-align: left;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table th {
+  background-color: #3d7b99;
+  color: #fff;
+  font-weight: normal;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table tbody tr:hover {
+  background: #f5f5f5;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table td:first-child {
+  font-weight: 500;
+  color: #555;
+}
+#qahm-page-analysis-assistant-window .qahm-conversation-data-table td:last-child {
+  text-align: right;
+  color: #0F172A;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+#qahm-page-analysis-assistant-window {
+  /* 前期比の色付けクラス */
+}
+#qahm-page-analysis-assistant-window .qahm-change-increase {
+  color: #2e7d32;
+  font-weight: 600;
+}
+#qahm-page-analysis-assistant-window .qahm-change-decrease {
+  color: #d32f2f;
+  font-weight: 600;
+}
+#qahm-page-analysis-assistant-window .qahm-change-neutral {
+  color: #757575;
+  font-weight: 600;
+}
+#qahm-page-analysis-assistant-window {
+  /* ヒートマップリンク */
+}
+#qahm-page-analysis-assistant-window .qahm-heatmap-link {
+  color: #0073aa;
+  text-decoration: none;
+  font-weight: 600;
+  transition: opacity 0.2s ease;
+}
+#qahm-page-analysis-assistant-window .qahm-heatmap-link:hover {
+  opacity: 0.8;
+}
+#qahm-page-analysis-assistant-window .qahm-heatmap-link:focus {
+  outline: 2px solid #0073aa;
+  outline-offset: 2px;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+  #qahm-page-analysis-assistant-window {
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    transform-origin: center;
+  }
+}
+
+/*# sourceMappingURL=page-analysis-assistant-wp.css.map */

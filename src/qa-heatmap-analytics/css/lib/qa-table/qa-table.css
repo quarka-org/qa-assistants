@@ -1,0 +1,528 @@
+/* QA Table CSS */
+.qa-table-container {
+    margin-bottom: 20px;
+}
+
+/* Table container with max-height */
+.qa-table-main-container {
+    position: relative;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+/* Scroll container for just the table */
+.qa-table-scroll-container {
+    width: 100%;
+    overflow: auto;
+}
+
+.qa-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+.qa-table th, 
+.qa-table td {
+    padding: 10px;
+    border: 1px solid #ddd;
+	overflow-wrap: break-word;
+	word-wrap: break-word;
+	word-break: break-all;
+}
+
+.qa-table th {
+    background-color: #f5f5f5;
+    font-weight: bold;
+    cursor: pointer;
+    position: relative;
+}
+
+.qa-table th.qa-not-sortable,
+.qa-table th.qa-select-column {
+    cursor: not-allowed;
+}
+
+.qa-table th:hover {
+    background-color: #e9e9e9;
+}
+
+/* Remove alternating row colors as requested */
+.qa-table tbody tr {
+    background-color: #fff;
+}
+
+.qa-table tbody tr:hover {
+    background-color: #f0f0f0;
+}
+
+/* Pagination */
+.qa-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+}
+
+.qa-pagination-info {
+    font-size: 14px;
+    color: #666;
+}
+
+.qa-pagination-controls {
+    display: flex;
+    align-items: center;
+}
+
+.qa-pagination button {
+    margin: 0 5px;
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    background-color: #fff;
+    color: #333; /* Ensure text is visible */
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.qa-pagination button.active {
+    background-color: #0073aa;
+    color: white;
+    border-color: #0073aa;
+}
+
+.qa-pagination button:hover:not(.active):not(:disabled) {
+    background-color: #f0f0f0;
+}
+
+/* Prevent hover color change on disabled buttons */
+.qa-pagination button:disabled:hover {
+    background-color: #fff;
+}
+
+.qa-pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    color: #999; /* Ensure disabled text is still visible */
+}
+
+.qa-pagination-ellipsis {
+    display: inline-block;
+    padding: 5px 8px;
+    color: #666;
+}
+
+/* Option */
+.qa-table-option-container {
+    display: flex;
+    align-items: flex-end;
+	margin-bottom: 24px;
+}
+
+/* Filtering */
+.qa-filter-title {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 16px;
+    font-size: 1.1em;
+    color: #333;
+    font-weight: bold;
+}
+
+.qa-filter-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.qa-filter-column,
+.qa-filter-type,
+.qa-filter-value {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 14px;
+}
+
+.qa-filter-value {
+    min-width: 150px;
+}
+
+.qa-filter-add,
+.qa-filter-clear {
+    padding: 7px 12px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.qa-filter-add {
+    background-color: #0073aa;
+    color: white;
+}
+
+.qa-filter-add:hover {
+    background-color: #0069d9;
+}
+
+.qa-filter-clear {
+    background-color: #6c757d;
+    color: white;
+}
+
+.qa-filter-clear:hover {
+    background-color: #5a6268;
+}
+
+/* Active filters */
+.qa-filter-list {
+    margin-top: 15px;
+}
+
+.qa-filter-empty {
+    color: #999;
+    font-style: italic;
+}
+
+.qa-filters-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+.qa-filter-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.qa-filter-tag {
+    display: inline-flex;
+    align-items: center;
+    background-color: #e6f3ff;
+    border: 1px solid #b3d7ff;
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+.qa-filter-text {
+    margin-right: 5px;
+}
+
+.qa-filter-remove {
+    background: none;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    font-weight: bold;
+    padding: 0 4px;
+    font-size: 14px;
+}
+
+.qa-filter-remove:hover {
+    color: #ff0000;
+}
+
+/* Export buttons */
+.qa-export-container {
+	margin-left: auto;
+}
+
+.qa-export-button {
+    padding: 7px 12px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+	margin-left: 10px;
+}
+
+.qa-export-csv {
+    background-color: #28a745;
+    color: white;
+}
+
+.qa-export-csv:hover {
+    background-color: #218838;
+}
+
+.qa-export-json {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.qa-export-json:hover {
+    background-color: #138496;
+}
+
+/* Row selection */
+.qa-select-column {
+    width: 30px;
+}
+
+.qa-select-cell {
+    text-align: center;
+}
+
+.qa-row-select,
+.qa-select-all {
+    cursor: pointer;
+}
+
+/* Cell with checkbox */
+.qa-cell-with-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.qa-row-select {
+    margin: 0;
+}
+
+/* Disabled checkboxes */
+.qa-row-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Empty message */
+.qa-empty-message {
+    text-align: center;
+    padding: 20px;
+    color: #999;
+    font-style: italic;
+}
+
+/* Sort icons */
+.qa-sort-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.qa-sort-icon {
+    margin-left: 5px;
+    font-size: 10px;
+    position: relative;
+}
+
+.qa-sort-icon[data-sort-index]:after {
+    content: attr(data-sort-index);
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 8px;
+    background-color: #0073aa;
+    color: white;
+    border-radius: 50%;
+    width: 12px;
+    height: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.qa-sort-asc {
+    color: #0073aa;
+}
+
+.qa-sort-desc {
+    color: #0073aa;
+}
+
+/* Column type specific styles */
+.qa-column-number,
+.qa-column-integer,
+.qa-column-float,
+.qa-column-currency,
+.qa-column-percentage {
+    text-align: right;
+}
+
+.qa-column-duration {
+	text-align: center;
+}
+
+.qa-column-date,
+.qa-column-datetime {
+    white-space: nowrap;
+}
+
+.qa-column-boolean {
+    text-align: center;
+}
+
+.qa-table-main-container {
+    position: relative;
+}
+
+/* 空データ表示のスタイル */
+.qa-empty-message {
+    padding: 0;
+    text-align: center;
+    width: 100%; /* 幅を100%に設定 */
+    height: 100%; /* 高さを100%に設定 */
+    display: table-cell;
+    vertical-align: middle;
+}
+
+.qa-no-data-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.qa-no-data-icon {
+    margin-bottom: 15px;
+    color: #999;
+}
+
+.qa-no-data-text {
+    font-size: 16px;
+    color: #666;
+    font-weight: bold;
+}
+
+/* テーブルの高さ設定用 */
+.qa-table-main-container {
+    position: relative;
+    transition: opacity 0.3s ease;
+}
+
+/* ローディング中のテーブル表示 */
+.qa-table-container {
+    position: relative;
+}
+
+/* Ensure table maintains column widths during loading */
+.qa-table {
+    table-layout: fixed;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+/* CSS rules for icon column removed as per user feedback */
+
+/* Remove underlines from links in table */
+.qa-table a {
+    text-decoration: none;
+}
+
+/* Link column styling */
+.qa-column-link {
+    color: #0073aa;
+}
+
+/* Loading */
+.qa-table-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+    pointer-events: none; /* Allow clicks to pass through */
+}
+
+.qa-table-loading-overlay.qa-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.qa-table-loading-icon-wrap {
+	position: absolute;
+	top: 280px;
+	left: 50%;
+	transform: translateX(-50%);
+	font-size: 20px;
+}
+
+/*
+上下左右中央配置
+.qa-table-loading-icon-wrap {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 20px;
+}
+*/
+
+.qa-table-loading-icon-text {
+	color: #666;
+	display: inline-block;
+	width: 170px;
+	margin-left: 8px;
+}
+
+.qa-table-loading-icon-text::after {
+	content: "";
+	display: inline-block;
+	width: 30px;
+	margin-left: 6px;
+	text-align: left;
+	animation: loadingDots 1.8s steps(1, end) infinite;
+}
+
+@keyframes loadingDots {
+	0%, 33.33% {
+		content: ".";
+	}
+	33.34%, 66.66% {
+		content: "..";
+	}
+	66.67%, 100% {
+		content: "...";
+	}
+}
+
+.qa-table-loading-icon-bounceball {
+	position: relative;
+	display: inline-block;
+	height: 35px;
+	width: 15px;
+	margin-right: 5px;
+	&:before {
+		position: absolute;
+		content: '';
+		display: block;
+		top: 0;
+		width: 15px;
+		height: 15px;
+		border-radius: 50%;
+		background-color: #666;
+		transform-origin: 50%;
+		animation: bounce 500ms alternate infinite ease;
+	}
+}
+
+@keyframes bounce {
+	0% {
+		top: 30px;
+		height: 5px;
+		border-radius: 60px 60px 20px 20px;
+		transform: scaleX(2);
+	}
+	35% {
+		height: 15px;
+		border-radius: 50%;
+		transform: scaleX(1);
+	}
+	100% {
+		top: 0;
+	}
+}

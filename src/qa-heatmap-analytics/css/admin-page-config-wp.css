@@ -1,0 +1,322 @@
+#class-qahm-admin-page-config .qahm-config__tab-content {
+  display: none;
+  width: 100%;
+  max-width: 800px;
+  clear: both;
+  overflow: hidden;
+  background-color: #fff;
+  padding: 24px;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content textarea,
+#class-qahm-admin-page-config .qahm-config__tab-content .large-text {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content .qahm-config__tab-description {
+  margin: 0 0 1.5em 0;
+  color: #666;
+  line-height: 1.6;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content .form-table {
+  width: 100%;
+  table-layout: fixed;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content--active {
+  display: block;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-item {
+  margin: 10px;
+  padding: 20px 0;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-item-thin {
+  margin: 10px;
+  padding: 20px 0 0 0;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description {
+  margin: 0;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description summary {
+  font-size: 20px;
+  background-color: #CDD4DA;
+  padding: 10px 5px 10px 5px;
+  cursor: pointer;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description summary:hover, details[open] #class-qahm-admin-page-config .qahm-config__tab-content-description summary {
+  background-color: #94A1AF;
+  color: #fff;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description summary span.el_edit {
+  font-size: 12px;
+  color: #000000;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description summary:hover span.el_edit {
+  font-size: 12px;
+  color: #fff;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description details {
+  margin-bottom: 20px;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content-description details[open] span.el_edit {
+  font-size: 12px;
+  color: #fff;
+}
+#class-qahm-admin-page-config .qahm-config__tab-content hr {
+  border: none;
+  background: linear-gradient(to right, #fff, #949494, #fff);
+  height: 1px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-box {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 24px 28px;
+  margin: 0 0 24px 0;
+  background: #fff;
+  box-shadow: 0px 1px 2px 0px rgba(0, 0, 0, 0.06);
+}
+#class-qahm-admin-page-config .qahm-config__goal-box h3 {
+  margin: 0 0 16px 0;
+}
+#class-qahm-admin-page-config .qahm-config__goal-box table {
+  width: 100%;
+}
+#class-qahm-admin-page-config .qahm-config__goal-box table tr {
+  vertical-align: top;
+}
+#class-qahm-admin-page-config .qahm-config__goal-box table td {
+  vertical-align: top;
+  padding: 10px 8px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-box input[type=radio] {
+  margin-right: 4px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-box label {
+  margin-right: 12px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-type-box {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e5e7eb;
+}
+#class-qahm-admin-page-config .qahm-config__goal-type-box label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: #666;
+}
+#class-qahm-admin-page-config .qahm-config__goal-type-box input[type=text] {
+  margin-top: 4px;
+  display: block;
+  width: 100%;
+  max-width: 500px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-type-box input[type=radio] {
+  margin-right: 4px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+#class-qahm-admin-page-config .qahm-config__goal-url-row input[type=text] {
+  flex: 1;
+  max-width: 500px;
+  margin-top: 0;
+}
+#class-qahm-admin-page-config .qahm-config__goal-url-row .qahm-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+#class-qahm-admin-page-config .qahm-config__goal-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+#class-qahm-admin-page-config .qahm-config__general-section {
+  padding: 5px 0 25px 0;
+}
+#class-qahm-admin-page-config .qahm-config__general-section-content {
+  margin-left: 20px;
+}
+#class-qahm-admin-page-config .qahm-config__general-section-content input[type=email] {
+  width: 90%;
+  height: 2.5em;
+  border-radius: 5px;
+}
+#class-qahm-admin-page-config .qahm-config__general-section-content table {
+  width: 320px;
+}
+#class-qahm-admin-page-config .qahm-config__general-section-content table tr > td > select {
+  width: 85%;
+}
+#class-qahm-admin-page-config .qahm-config__event-iframe-container {
+  overflow: hidden;
+  width: 100%;
+}
+#class-qahm-admin-page-config .qahm-config__iframe-width-control {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 13px;
+  color: #666;
+}
+#class-qahm-admin-page-config .qahm-config__iframe-width-control label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#class-qahm-admin-page-config .qahm-config__iframe-width-slider {
+  width: 200px;
+  cursor: pointer;
+}
+#class-qahm-admin-page-config .qahm-config__iframe-width-value {
+  min-width: 52px;
+  text-align: right;
+  font-family: monospace;
+}
+#class-qahm-admin-page-config .qahm-config__iframe-scale-wrapper {
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+#class-qahm-admin-page-config .qahm-config__event-tooltip {
+  display: none;
+  position: relative;
+  cursor: pointer;
+  word-break: normal;
+  z-index: 1000;
+  padding: 8px;
+  background-color: hsla(0, 0%, 20%, 0.9);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 6px;
+  text-align: left;
+  margin-left: 0;
+  margin-bottom: -16px;
+}
+#class-qahm-admin-page-config .qahm-config__event-tooltip--right {
+  display: none;
+  position: relative;
+  pointer-events: none;
+}
+#class-qahm-admin-page-config .qahm-config__event-tooltip--right:before {
+  z-index: 1001;
+  border: 6px solid transparent;
+  background: transparent;
+  content: "";
+  top: 10px;
+  margin-bottom: 0;
+  margin-left: -32px;
+  border-top-color: transparent;
+  border-right-color: hsla(0, 0%, 20%, 0.9);
+  position: absolute;
+  pointer-events: none;
+  transform: translateX(12px);
+}
+#class-qahm-admin-page-config .qahm-config__content-width {
+  width: 100%;
+}
+#class-qahm-admin-page-config .qahm-config__goal-col-label {
+  width: 20%;
+}
+#class-qahm-admin-page-config .qahm-config__goal-col-input {
+  width: 80%;
+}
+#class-qahm-admin-page-config .qahm-config__event-type-hidden {
+  display: none;
+}
+#class-qahm-admin-page-config .qahm-config__event-example {
+  background-color: #eee;
+  padding: 0 10px;
+}
+#class-qahm-admin-page-config .qahm-config__unlock-link {
+  font-size: 0.9em;
+  color: #2271b1;
+  cursor: pointer;
+  text-decoration: underline;
+}
+#class-qahm-admin-page-config .qahm-config__submit-center {
+  text-align: center;
+}
+#class-qahm-admin-page-config .qahm-config__auth-status {
+  font-size: 13px;
+}
+#class-qahm-admin-page-config .qahm-config-note {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+#class-qahm-admin-page-config .qahm-config-note__list {
+  margin: 0 0 0.6em 1.1em;
+  list-style: disc;
+}
+#class-qahm-admin-page-config .qahm-config-note__list-item {
+  margin-bottom: 0.4em;
+}
+#class-qahm-admin-page-config .qahm-config-note__footer {
+  margin: 1.5em 0 0;
+  color: #4b5563;
+}
+#class-qahm-admin-page-config .tabs {
+  position: relative;
+}
+#class-qahm-admin-page-config .visible_animation {
+  display: block;
+  animation-duration: 0.5s;
+  animation-name: fade-in;
+}
+@keyframes fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+#class-qahm-admin-page-config #tab_goal_content {
+  max-width: none;
+}
+#class-qahm-admin-page-config #tab_goal_content table th, #class-qahm-admin-page-config #tab_goal_content table td {
+  padding: 1.2em 10px 1.2em 1em;
+  border-right: none;
+}
+#class-qahm-admin-page-config #tab_goal_content table label {
+  display: inline-block;
+  margin-right: 10px;
+}
+#class-qahm-admin-page-config #tab_google_content table th, #class-qahm-admin-page-config #tab_google_content table td,
+#class-qahm-admin-page-config #tab_site_attr_content table th,
+#class-qahm-admin-page-config #tab_site_attr_content table td {
+  padding: 1.2em 10px 1.2em 1em;
+  text-align: left;
+  border-right: none;
+}
+#class-qahm-admin-page-config h2, #class-qahm-admin-page-config h3 {
+  color: #666;
+  font-size: 1.3em;
+  margin: 1em 0;
+}
+#class-qahm-admin-page-config .form-table th {
+  color: #666;
+  font-weight: 600;
+}
+#class-qahm-admin-page-config h4 {
+  font-size: 1em;
+  margin: 1.33em 0;
+}
+#class-qahm-admin-page-config p {
+  display: block;
+  margin-block-start: 1em;
+  margin-block-end: 1em;
+  margin-inline-start: 0px;
+  margin-inline-end: 0px;
+  unicode-bidi: isolate;
+}
+#class-qahm-admin-page-config .td_gtype_save {
+  opacity: 0;
+}

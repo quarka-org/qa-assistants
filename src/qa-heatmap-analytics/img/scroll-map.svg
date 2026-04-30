@@ -1,0 +1,17 @@
+<svg id="スクロールマップ.svg" xmlns="http://www.w3.org/2000/svg" width="20" height="16" viewBox="0 0 20 16">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: none;
+      }
+
+      .cls-2 {
+        fill: #fff;
+        fill-rule: evenodd;
+      }
+    </style>
+  </defs>
+  <rect id="長方形_10_のコピー" data-name="長方形 10 のコピー" class="cls-1" width="20" height="16"/>
+  <path id="多角形_1_のコピー_3" data-name="多角形 1 のコピー 3" class="cls-2" d="M6.469,9.979H8.99L5.5,16.025,2.01,9.979H4.656V6.021H2.01L5.5-.025,8.99,6.021H6.469V9.979Z"/>
+  <path id="長方形_4" data-name="長方形 4" class="cls-2" d="M16.813,5.016H10.531V1.031H18.05ZM15.464,9.359H10.531V6.375H16.39ZM14.43,12.688h-3.9V10.719h4.51ZM13.7,15.031H10.531v-1h3.482Z"/>
+</svg>

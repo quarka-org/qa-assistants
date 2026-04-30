@@ -1,0 +1,433 @@
+/*
+	汎用
+*/
+@font-face {
+    font-family: 'Kosugi';
+    src: url('../fonts/KosugiMaru-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+.qahm-hide{
+  /*display:none;*/
+  visibility: hidden;
+}
+
+/*
+	ロード画面
+*/
+#qahm-container .qahm-fade {
+	transition: opacity 0.4s, visibility 0s ease 0.4s;
+	opacity: 0;
+	visibility: hidden;
+}
+
+#qahm-container .qahm-fade.qahm-fadein {
+	transition-delay: 0s;
+	opacity: 1;
+	visibility: visible;
+}
+
+#qahm-container #qahm-loading-container,
+#qahm-container #qahm-progress-container {
+	position: fixed;
+	width: 100%;
+	height: 100%;
+	top: 0px;
+	left: 0px;
+	background-color: rgba(0,0,0,0.5);
+	z-index: 1010;
+}
+
+#qahm-container #qahm-loading{
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	width: 60px;
+	height: 60px;
+	margin-top: -30px;
+	margin-left: -30px;
+	border: 5px solid rgba(255,255,255,0.4);
+	border-top-color: rgba(255,255,255,0.9);
+	border-radius: 50%;
+	animation: spin 1.2s linear 0s infinite;
+}
+@keyframes spin {
+	0% {transform: rotate(0deg);}
+	100% {transform: rotate(360deg);}
+}
+
+#qahm-container #qahm-progress-back {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	width: 300px;
+	height: 24px;
+	margin-top: -22px;
+	margin-left: -150px;
+	background-color: #eee;
+}
+
+#qahm-container #qahm-progress-bar {
+	position: absolute;
+	width: 0%;
+	height: 100%;
+	background-color: #fff;
+}
+
+#qahm-container #qahm-progress-info {
+	position: fixed;
+	display: table;
+	top: 50%;
+	left: 50%;
+	width: 300px;
+	margin-top: 6px;
+	margin-left: -150px;
+	color: #fff;
+	font-size: 14px;
+}
+
+#qahm-container #qahm-progress-info #qahm-progress-text {
+	display: table-cell;
+	text-align: left;
+}
+
+#qahm-container #qahm-progress-info #qahm-progress-percent {
+	display: table-cell;
+	text-align: right;
+}
+
+
+/*
+	effect
+*/
+
+#qahm-container #qahm-effect-container {
+	position: fixed;
+	height: 100%;
+	width: 100%;
+	left: 0;
+	top: 0;
+	z-index: 1020;
+	pointer-events: none;
+}
+
+
+/*
+	sweet alert 2
+*/
+.swal2-container {
+	line-height: normal;
+}
+
+
+/**
+ * Tooltip Styles
+ */
+
+/* Base styles for the element that has a tooltip */
+[data-qahm-tooltip],
+.qahm-tooltip {
+	position: relative;
+	cursor: pointer;
+	word-break: normal;
+}
+
+/* Base styles for the entire tooltip */
+[data-qahm-tooltip]:before,
+[data-qahm-tooltip]:after,
+.qahm-tooltip:before,
+.qahm-tooltip:after {
+	position: absolute;
+	visibility: hidden;
+	-ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=0)";
+	filter: progid:DXImageTransform.Microsoft.Alpha(Opacity=0);
+	opacity: 0;
+	-webkit-transition: 
+		opacity 0.2s ease-in-out,
+		visibility 0.2s ease-in-out,
+		-webkit-transform 0.2s ease-in-out;
+	-moz-transition:    
+		opacity 0.2s ease-in-out,
+		visibility 0.2s ease-in-out,
+		-moz-transform 0.2s ease-in-out;
+	transition:         
+		opacity 0.2s ease-in-out,
+		visibility 0.2s ease-in-out,
+		transform 0.2s ease-in-out;
+	-webkit-transform: translate3d(0, 0, 0);
+	-moz-transform:    translate3d(0, 0, 0);
+	transform:         translate3d(0, 0, 0);
+	pointer-events: none;
+}
+
+/* Show the entire tooltip on hover and focus */
+[data-qahm-tooltip]:hover:before,
+[data-qahm-tooltip]:hover:after,
+[data-qahm-tooltip]:focus:before,
+[data-qahm-tooltip]:focus:after,
+.qahm-tooltip:hover:before,
+.qahm-tooltip:hover:after,
+.qahm-tooltip:focus:before,
+.qahm-tooltip:focus:after {
+	visibility: visible;
+	-ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=100)";
+	filter: progid:DXImageTransform.Microsoft.Alpha(Opacity=100);
+	opacity: 1;
+}
+
+/* Base styles for the tooltip's directional arrow */
+.qahm-tooltip:before,
+[data-qahm-tooltip]:before {
+	z-index: 1001;
+	border: 6px solid transparent;
+	background: transparent;
+	content: "";
+}
+
+/* Base styles for the tooltip's content area */
+.qahm-tooltip:after,
+[data-qahm-tooltip]:after {
+	z-index: 1000;
+	padding: 8px;
+	width: 160px;
+	background-color: #000;
+	background-color: hsla(0, 0%, 20%, 0.9);
+	color: #fff;
+	content: attr(data-qahm-tooltip);
+	font-size: 14px;
+	line-height: 1.4;
+	border-radius: 6px;
+	display: inline-block;
+    text-align: left;
+}
+
+/* Directions */
+
+/* Top (default) */
+[data-qahm-tooltip]:before,
+[data-qahm-tooltip]:after,
+.qahm-tooltip:before,
+.qahm-tooltip:after,
+.qahm-tooltip-top:before,
+.qahm-tooltip-top:after {
+	bottom: 100%;
+	left: 50%;
+}
+
+[data-qahm-tooltip]:before,
+.qahm-tooltip:before,
+.qahm-tooltip-top:before {
+	margin-left: -6px;
+	margin-bottom: -12px;
+	border-top-color: #000;
+	border-top-color: hsla(0, 0%, 20%, 0.9);
+}
+
+/* Horizontally align top/bottom tooltips */
+[data-qahm-tooltip]:after,
+.qahm-tooltip:after,
+.qahm-tooltip-top:after {
+	margin-left: -80px;
+}
+
+[data-qahm-tooltip]:hover:before,
+[data-qahm-tooltip]:hover:after,
+[data-qahm-tooltip]:focus:before,
+[data-qahm-tooltip]:focus:after,
+.qahm-tooltip:hover:before,
+.qahm-tooltip:hover:after,
+.qahm-tooltip:focus:before,
+.qahm-tooltip:focus:after,
+.qahm-tooltip-top:hover:before,
+.qahm-tooltip-top:hover:after,
+.qahm-tooltip-top:focus:before,
+.qahm-tooltip-top:focus:after {
+	-webkit-transform: translateY(-12px);
+	-moz-transform:    translateY(-12px);
+	transform:         translateY(-12px); 
+}
+
+/* Left */
+.qahm-tooltip-left:before,
+.qahm-tooltip-left:after {
+	right: 100%;
+	bottom: 50%;
+	left: auto;
+}
+
+.qahm-tooltip-left:before {
+	margin-left: 0;
+	margin-right: -12px;
+	margin-bottom: 0;
+	border-top-color: transparent;
+	border-left-color: #000;
+	border-left-color: hsla(0, 0%, 20%, 0.9);
+}
+
+.qahm-tooltip-left:hover:before,
+.qahm-tooltip-left:hover:after,
+.qahm-tooltip-left:focus:before,
+.qahm-tooltip-left:focus:after {
+	-webkit-transform: translateX(-12px);
+	-moz-transform:    translateX(-12px);
+	transform:         translateX(-12px); 
+}
+
+/* Bottom */
+.qahm-tooltip-bottom:before,
+.qahm-tooltip-bottom:after {
+	top: 100%;
+	bottom: auto;
+	left: 50%;
+}
+
+.qahm-tooltip-bottom:before {
+	margin-top: -12px;
+	margin-bottom: 0;
+	border-top-color: transparent;
+	border-bottom-color: #000;
+	border-bottom-color: hsla(0, 0%, 20%, 0.9);
+}
+
+.qahm-tooltip-bottom:hover:before,
+.qahm-tooltip-bottom:hover:after,
+.qahm-tooltip-bottom:focus:before,
+.qahm-tooltip-bottom:focus:after {
+	-webkit-transform: translateY(12px);
+	-moz-transform:    translateY(12px);
+	transform:         translateY(12px); 
+}
+
+/* Right */
+.qahm-tooltip-right:before,
+.qahm-tooltip-right:after {
+	bottom: 50%;
+	left: 100%;
+}
+
+.qahm-tooltip-right:before {
+	margin-bottom: 0;
+	margin-left: -12px;
+	border-top-color: transparent;
+	border-right-color: #000;
+	border-right-color: hsla(0, 0%, 20%, 0.9);
+}
+
+.qahm-tooltip-right:hover:before,
+.qahm-tooltip-right:hover:after,
+.qahm-tooltip-right:focus:before,
+.qahm-tooltip-right:focus:after {
+	-webkit-transform: translateX(12px);
+	-moz-transform:    translateX(12px);
+	transform:         translateX(12px); 
+}
+
+/* Move directional arrows down a bit for left/right tooltips */
+.qahm-tooltip-left:before,
+.qahm-tooltip-right:before {
+	top: 3px;
+}
+
+/* Vertically center qahm-tooltip content for left/right tooltips */
+.qahm-tooltip-left:after,
+.qahm-tooltip-right:after {
+	margin-left: 0;
+	margin-bottom: -16px;
+}
+
+
+/* プログレスバー progress-bar-exec用--------------------- */
+.scrn-prog-shade {
+	position: fixed;
+	width: 100%;
+	height: 100%;
+	top: 0px;
+	left: 0px;
+	background-color: rgba(0,0,0,0.5);
+	z-index: 1010;
+}
+.scrn-prog-frame {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	width: 300px;
+	height: 24px;
+	margin-top: -22px;
+	margin-left: -150px;
+	background-color: #eee;
+}
+.scrn-prog-text-above {
+	position: fixed;
+	display: table;
+	top: 50%;
+	left: 50%;
+	width: 500px;
+	margin-top: -72px;
+	margin-left: -150px;
+	color: #fff;
+	font-size: 14px;
+}
+.scrn-prog-text-below {
+	position: fixed;
+	display: table;
+	table-layout: fixed;
+	top: 50%;
+	left: 50%;
+	width: 300px;
+	margin-top: 6px;
+	margin-left: -150px;
+	color: #fff;
+	font-size: 14px;
+}
+.scrn-prog-below-left {
+	display: table-cell;
+text-align: left;
+
+}
+.scrn-prog-below-right {
+	display: table-cell;
+text-align: right;
+
+}
+.scrn-prog-frame > div {
+	height: 24px;
+	width: 0%;
+	background-color: rgb(76, 167,203);
+}
+.embed-prog-container {
+	position: static;
+	width:100%;
+	margin: 1.5em;
+}
+.embed-prog-frame {
+	width: 360px;
+	height: 18px;
+	border: 1px solid #0073aa;
+}
+.embed-prog-frame > div {
+	height: 18px;
+	width: 0%;
+	background-color: rgb(76, 167,203);
+}
+.embed-prog-text-below {
+	position: static;
+	width: 360px;
+	color:rgb(0, 127, 177);
+	font-size: 14px;
+}
+.embed-prog-below-left {
+	display: inline-block;
+	width: 80%;
+	margin-top: 2px;
+	padding-top: 1px;
+	text-align: left;
+}
+.embed-prog-below-right {
+	display: inline-block;
+	width: 20%;
+	margin-top: 2px;
+	padding-top: 1px;
+	text-align: right;
+}
+/*progress-bar-exec用終り------------------*/

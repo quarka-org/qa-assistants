@@ -1,0 +1,79 @@
+/*
+	管理画面上部の告知メッセージ
+*/
+.qahm-announce-container {
+	display: flex;
+	align-items: center;
+	background-color: #fff;
+    margin: 5px 0 15px 2px;
+	padding: 16px;
+    border: 1px solid #ccd0d4;
+    border-left-width: 4px;
+	border-left-color: #00a0d2;
+    box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
+}
+
+.qahm-announce-container-success {
+	border-left-color: #00a32a;
+}
+
+.qahm-announce-container-info {
+	border-left-color: #72aee6;
+}
+
+.qahm-announce-container-warning {
+	border-left-color: #dba617;
+}
+
+.qahm-announce-container-error {
+	border-left-color: #d63638;
+}
+
+.qahm-announce-icon {
+	height: 20px;
+	margin-right: 14px;
+}
+
+.qahm-announce-icon-success {
+	fill: #00a32a;
+}
+
+.qahm-announce-icon-info {
+	fill: #72aee6;
+}
+
+.qahm-announce-icon-warning {
+	fill: #dba617;
+}
+
+.qahm-announce-icon-error {
+	fill: #d63638;
+}
+
+.qahm-announce-text {
+	margin-right: 1em;
+}
+
+.qahm-using-free-announce {
+    padding: 10px;
+    background-color: #886174;
+    color: white;
+}
+.qahm-using-free-announce a {
+    color: white;
+}
+
+.qahm-announce-button {
+	margin-left: auto;
+	background-color: #e43860;
+	border-radius: 24px;
+	padding: 8px 12px;
+	text-align: center;
+	cursor: pointer;
+}
+
+.qahm-announce-button > a {
+	font-weight: bold;
+	color: #fff;
+	text-decoration: none;
+}

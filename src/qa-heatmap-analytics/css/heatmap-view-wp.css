@@ -1,0 +1,1008 @@
+@charset "UTF-8";
+:root {
+  --heatmap-bar-height: 98px;
+}
+
+html, body {
+  height: 100%;
+}
+
+.frame {
+  position: absolute;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.frame-inner {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  height: 100%;
+}
+
+iframe {
+  border: none;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+	cap.php
+	上部バー（BEM構造）- 2段構成レイアウト
+	元のベースカラー: #1f2823 / #efefef
+*/
+.heatmap-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: #1f2823;
+  color: #efefef;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 3;
+}
+.heatmap-bar__row {
+  width: 100%;
+}
+.heatmap-bar__row--1 {
+  background: #2a3530;
+  border-bottom: 1px solid #3a4540;
+  padding: 12px 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.heatmap-bar__row--2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1f2823;
+  padding: 12px 32px;
+  border-bottom: 1px solid #3a4540;
+}
+.heatmap-bar__items {
+  display: flex;
+  justify-content: flex-start;
+  gap: 16px;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.heatmap-bar__display {
+  flex: 1;
+}
+.heatmap-bar__display .heatmap-bar__items {
+  gap: 20px;
+}
+.heatmap-bar__info {
+  flex: 0 0 auto;
+}
+.heatmap-bar__info .heatmap-bar__items {
+  justify-content: flex-end;
+  gap: 24px;
+  font-size: 13px;
+}
+.heatmap-bar__controls-left {
+  flex: 1;
+}
+.heatmap-bar__controls-left .heatmap-bar__items {
+  justify-content: flex-start;
+}
+.heatmap-bar__controls-right {
+  flex: 0 0 auto;
+}
+.heatmap-bar__controls-right .heatmap-bar__items {
+  justify-content: flex-end;
+}
+.heatmap-bar__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #efefef;
+}
+.heatmap-bar__item img, .heatmap-bar__item svg {
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.heatmap-bar__item--button button {
+  background: linear-gradient(135deg, #006d8f 0%, #3BAFDA 100%);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+.heatmap-bar__item--button button:hover {
+  opacity: 0.9;
+}
+.heatmap-bar__item--button button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.heatmap-bar__item--checkbox .heatmap-bar__checkbox-input {
+  margin-right: 8px;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+  accent-color: #006d8f;
+}
+.heatmap-bar__item--checkbox .heatmap-bar__checkbox-input:checked {
+  accent-color: #006d8f;
+}
+.heatmap-bar__item--checkbox .heatmap-bar__checkbox-input:focus {
+  outline: 2px solid #3BAFDA;
+  outline-offset: 2px;
+}
+.heatmap-bar__item--checkbox .heatmap-bar__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #efefef;
+  transition: color 0.2s ease;
+}
+.heatmap-bar__item--checkbox .heatmap-bar__checkbox-label:hover {
+  color: #3BAFDA;
+}
+input:checked + .heatmap-bar__item--checkbox .heatmap-bar__checkbox-label {
+  color: #3BAFDA;
+  font-weight: 600;
+}
+.heatmap-bar__item--checkbox .heatmap-bar__checkbox-label img, .heatmap-bar__item--checkbox .heatmap-bar__checkbox-label svg {
+  vertical-align: middle;
+}
+.heatmap-bar__item--link a {
+  color: #efefef;
+  text-decoration: none;
+}
+.heatmap-bar__item--link a:hover {
+  text-decoration: underline;
+}
+.heatmap-bar__item select {
+  position: relative;
+  height: 24px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #333;
+  padding: 0px 4px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: #fff;
+}
+.heatmap-bar__item select:focus {
+  border-color: #006d8f;
+  outline: none;
+  box-shadow: 0 0 0 1px #3BAFDA;
+}
+.heatmap-bar__item input[type=text] {
+  position: relative;
+  height: 24px;
+  font-size: 14px;
+  padding: 0px 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #333;
+}
+.heatmap-bar__item input[type=text]:focus {
+  border-color: #006d8f;
+  outline: none;
+  box-shadow: 0 0 0 1px #3BAFDA;
+}
+
+#heatmap-bar a,
+.heatmap-bar a {
+  color: #efefef;
+  text-decoration: underline;
+  transition: opacity 0.3s ease;
+}
+#heatmap-bar a:hover,
+.heatmap-bar a:hover {
+  opacity: 0.8;
+}
+#heatmap-bar a:visited,
+.heatmap-bar a:visited {
+  color: #efefef;
+}
+
+@media screen and (max-width: 768px) {
+  .heatmap-bar__row--2 {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .heatmap-bar__display, .heatmap-bar__info {
+    width: 100%;
+  }
+  .heatmap-bar__display .heatmap-bar__items, .heatmap-bar__info .heatmap-bar__items {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+#heatmap-bar-row-1 {
+  padding: 12px 32px;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+}
+#heatmap-bar-row-1 #heatmap-bar-row-controls ul {
+  display: flex;
+  justify-content: flex-start;
+  gap: 16px;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#heatmap-bar-row-2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 32px;
+  background: #fafafa;
+  border-bottom: 1px solid #ddd;
+}
+#heatmap-bar-row-2 #heatmap-bar-row-display {
+  flex: 1;
+}
+#heatmap-bar-row-2 #heatmap-bar-row-display ul {
+  display: flex;
+  justify-content: flex-start;
+  gap: 20px;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+#heatmap-bar-row-2 #heatmap-bar-row-info {
+  flex: 0 0 auto;
+}
+#heatmap-bar-row-2 #heatmap-bar-row-info ul {
+  display: flex;
+  justify-content: flex-end;
+  gap: 24px;
+  align-items: center;
+  font-size: 13px;
+  color: #666;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.heatmap-bar-selectbox {
+  height: 26px;
+  padding: 2px 12px;
+  line-height: 22px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.heatmap-bar-selectbox:focus {
+  outline: none;
+  border-color: #3BAFDA;
+}
+
+.heatmap-bar__checkbox-input {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  cursor: pointer;
+  accent-color: #006d8f;
+  transition: all 0.3s ease;
+}
+
+#heatmap-bar-row-display li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#heatmap-bar-row-display img {
+  width: 20px;
+  height: 20px;
+}
+
+@media screen and (max-width: 768px) {
+  #heatmap-bar-row-1,
+  #heatmap-bar-row-2 {
+    padding: 10px 16px;
+  }
+  #heatmap-bar-row-2 {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  #heatmap-bar-row-2 #heatmap-bar-row-display,
+  #heatmap-bar-row-2 #heatmap-bar-row-info {
+    width: 100%;
+  }
+  #heatmap-bar-row-2 #heatmap-bar-row-display ul,
+  #heatmap-bar-row-2 #heatmap-bar-row-info ul {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+#heatmap-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: table;
+  width: 100%;
+  height: 70px;
+  background-color: #1f2823;
+  font-size: 16px;
+  color: #efefef;
+  padding-left: 20px;
+  padding-right: 20px;
+  z-index: 3;
+}
+
+#heatmap-bar-inner {
+  display: table-cell;
+  vertical-align: middle;
+}
+
+#heatmap-nav img {
+  vertical-align: -0.125em;
+  margin-left: 1.3em;
+  margin-right: 0.3em;
+}
+
+#heatmap-nav svg {
+  margin-right: 0.3em;
+}
+
+#heatmap-nav label,
+#heatmap-nav ul > li {
+  color: #efefef;
+}
+
+#heatmap-nav ul {
+  list-style: none;
+  display: table;
+  margin: 0 auto;
+  line-height: 1.4;
+}
+
+#heatmap-nav ul > li {
+  position: relative;
+  float: left;
+  margin-right: 1.6em;
+  margin-bottom: 4px;
+  margin-top: 4px;
+  height: 20px;
+}
+
+#heatmap-nav ul > li label,
+#heatmap-nav ul > li a {
+  display: inline-block;
+  color: #efefef;
+  text-decoration: none;
+}
+
+#heatmap-nav ul > li select, #heatmap-nav ul > li input {
+  position: relative;
+  height: 24px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #333;
+  padding: 0px 4px;
+  border-radius: 4px;
+}
+
+#heatmap-nav li.separator {
+  height: 22px;
+  border-right: 1px solid #efefef;
+  width: 1px;
+}
+
+#heatmap-nav label:after {
+  background: #aaaaaa;
+  top: 0;
+  width: 40px;
+  height: 32px;
+  transition: 0.4s;
+}
+
+#heatmap-nav input:checked + label:after {
+  background: #1abc9c;
+  left: 50px;
+  transition: 0.4s;
+}
+
+#heatmap-nav .heatmap-bar-check {
+  display: none;
+}
+
+/*
+	cap.php
+	モバイル対応
+*/
+#qahm-mobile-menu > ul {
+  line-height: 0;
+  opacity: 0;
+  visibility: hidden;
+  background: #fff;
+  color: #fff;
+  transition: all 0.6s;
+  background-color: #fff;
+  color: #333;
+  border: 1px solid #333;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10%;
+  padding-right: 10%;
+}
+
+#qahm-mobile-menu > ul > li {
+  font-size: 16px;
+  list-style-type: none;
+  padding: 0;
+  width: 100%;
+  border: none;
+  /* 閉じている状態 */
+  padding-top: 0;
+  padding-bottom: 0;
+  /* 閉じるアニメーション */
+  transition: border-top 0.3s ease-out, padding-top 0.3s ease-out, padding-bottom 0.3s ease-out;
+}
+
+#heatmap-bar #heatmap-nav {
+  display: block;
+  font-size: 14px;
+}
+
+/*
+@media screen and (max-width:834px){
+	#heatmap-bar #heatmap-nav {
+		display: none;
+	}
+
+	#heatmap-bar #heatmap-mobile-nav {
+		display: block;
+	}
+
+	#qahm-mobile-menu {
+		display: block;
+	}
+}*/
+#heatmap-bar .control {
+  display: block;
+  position: relative;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+#heatmap-bar .control input {
+  width: 0px;
+  height: 0px;
+}
+
+#heatmap-bar .control__indicator {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  height: 16px;
+  width: 16px;
+  background: #e6e6e6;
+  border-radius: 4px;
+}
+
+#heatmap-bar .control--radio .control__indicator {
+  border-radius: 50%;
+}
+
+#heatmap-bar .control:hover input ~ .control__indicator,
+#heatmap-bar .control input:focus ~ .control__indicator {
+  background: #ccc;
+}
+
+#heatmap-bar .control input:checked ~ .control__indicator {
+  background: #1abc9c;
+}
+
+#heatmap-bar .control input:disabled ~ .control__indicator {
+  background: #e6e6e6;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+#heatmap-bar .control__indicator:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+#heatmap-bar .control input:checked ~ .control__indicator:after {
+  display: block;
+}
+
+#heatmap-bar .control--checkbox .control__indicator:after {
+  left: 6px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+#heatmap-bar .control--checkbox input:disabled ~ .control__indicator:after {
+  border-color: #7b7b7b;
+}
+
+/*
+	ヒートマップ表示画面
+*/
+#heatmap-container {
+  pointer-events: none;
+  margin-top: var(--heatmap-bar-height);
+}
+
+#heatmap-iframe-container {
+  margin-top: var(--heatmap-bar-height);
+}
+
+#heatmap-iframe-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+/*
+#heatmap-attention-scroll {
+	position: absolute;
+    width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+	z-index: 2;
+	top: 0;
+	left: 0;
+}*/
+/*
+#heatmap-scroll {
+	position: absolute;
+	height: 100%;
+	box-sizing: border-box;
+	width: 100%;
+	text-align: center;
+	overflow: visible;
+	white-space: nowrap;
+	z-index: 1;
+	top: 0;
+    left: 0;
+	margin: 0 auto;
+}*/
+#heatmap-click-heat-wrapper {
+  position: relative;
+}
+
+#heatmap-click-count-wrapper {
+  position: relative;
+}
+
+#heatmap-attention-scroll-wrapper {
+  position: relative;
+  z-index: 2;
+}
+
+#heatmap-scroll {
+  position: absolute;
+  z-index: 1;
+}
+
+.heatmap-scroll-font {
+  line-height: 1.6;
+  color: #fff;
+  text-shadow: black 1px 1px 1px, black -1px 1px 1px, black 1px -1px 1px, black -1px -1px 1px;
+}
+
+.heatmap-scroll-font-dsk {
+  font-size: 28px;
+}
+
+.heatmap-scroll-font-tab {
+  font-size: 22px;
+}
+
+.heatmap-scroll-font-smp {
+  font-size: 16px;
+}
+
+/* スクロールマップのツールチップ */
+#heatmap-scroll-tooltip {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 3;
+  padding: 8px;
+  background-color: hsla(0, 0%, 20%, 0.9);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  border-radius: 6px;
+  text-align: left;
+}
+
+#heatmap-scroll-data-num {
+  font-size: 1.3em;
+}
+
+/*
+#heatmap-attention {
+	position: absolute;
+    width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+	z-index: 0;
+	top: 0;
+    left: 0;
+}*/
+#heatmap-attention {
+  z-index: 0;
+  position: absolute;
+}
+
+/* QA ZERO */
+.tablejs_hmview table.bl_jsTb {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  border: solid 1px #ddd;
+  text-align: left;
+}
+
+.tablejs_hmview table.bl_jsTb th {
+  font-size: 90%;
+  line-height: 150%;
+  text-align: center;
+  padding: 10px;
+  border: 1px solid #e3e3e3;
+  background: var(--SubColor, #00ba8d);
+  color: var(--White, #fff);
+  text-align: center;
+  font-family: SF Pro Text;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 18px; /* 138.462% */
+}
+
+.tablejs_hmview table.bl_jsTb td {
+  padding: 10px;
+  line-height: 150%;
+  border: solid 1px #e3e3e3;
+  background-color: #fff;
+  overflow-wrap: break-word;
+}
+
+.tablejs_hmview table.bl_jsTb a {
+  text-decoration: none;
+}
+
+.tablejs_hmview .bl_tbControler {
+  margin-bottom: 21px;
+}
+
+.tablejs_hmview .bl_tbControlerL {
+  display: flex;
+  align-items: flex-start;
+  gap: 21px;
+}
+
+.tablejs_hmview input[type=button].showFilterBtn, .tablejs_hmview input[type=button].closeFilterBtn {
+  display: flex;
+  padding: 11.5px 12px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  border-radius: 2px;
+  border: 1.5px solid var(--SubColor, #00BA8D);
+  background: var(--KeyGradation-horizontal, linear-gradient(270deg, #00CD0A 0%, #00C63D 0%, #00BA8D 100%));
+  color: var(--gutenberg-white, #FFF);
+  /* Button */
+  font-family: SF Pro Text;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 13px; /* 100% */
+  cursor: pointer;
+}
+
+.tablejs_hmview span.clearAllBtn {
+  display: flex;
+  padding: 11.5px 12px;
+  flex-direction: column;
+  align-items: center;
+  border-radius: 2px;
+  border: 1px solid var(--KeyGradation, #00CD0A);
+  /* Button */
+  font-family: SF Pro Text;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 13px; /* 100% */
+  background: var(--KeyGradation, linear-gradient(180deg, #00CD0A 0%, #00BA8D 100%));
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  cursor: pointer;
+}
+
+.tablejs_hmview .icon-replay {
+  cursor: pointer;
+  color: #00ba8d;
+}
+
+.tablejs_hmview .icon-replay:hover {
+  color: #00d3a0;
+}
+
+.tablejs_hmview .icon-replay-disable {
+  cursor: pointer;
+  color: #656565;
+}
+
+.tablejs_hmview .icon-replay-disable:hover {
+  color: #b9b9b9;
+}
+
+.tablejs_hmview .qahm-heatmap-link {
+  cursor: pointer;
+  color: #00ba8d;
+}
+
+.tablejs_hmview span.el_loading {
+  position: relative;
+  display: inline-block;
+}
+
+.tablejs_hmview span.el_loading span {
+  position: absolute;
+  display: inline-block;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 2px;
+  background-position: 0 0;
+  background-repeat: repeat-x;
+  background-size: 10px 100%;
+  background-image: linear-gradient(to right, transparent 5px, #000 5px, #000 10px);
+  animation: el_loading_animation 0.5s linear infinite;
+}
+
+@keyframes el_loading_animation {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 10px 0;
+  }
+}
+/* テーブルの大きさ拡縮 */
+.tablejs_hmview .sc_tableScaleUp, .tablejs_hmview .sc_tableScaleDown {
+  background-color: #00ba8d; /* 余白の背景色を指定 */
+}
+
+.tablejs_hmview .sc_tableScaleUp:hover, .tablejs_hmview .sc_tableScaleDown:hover {
+  background-color: #009c75; /* マウスオーバー時の背景色 */
+} 
+#heatmap-bar-version-update-button, .filter-data-button {
+  height: 26px;
+  padding: 2px 12px;
+  line-height: 22px;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+#heatmap-bar-version-update-button:hover, .filter-data-button:hover {
+  opacity: 0.9;
+}
+#heatmap-bar-version-update-button:disabled, .filter-data-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-data-button {
+  background: linear-gradient(135deg, #006d8f 0%, #3BAFDA 100%);
+}
+
+/* モーダルの背景 */
+.filter-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  visibility: hidden; /* 初期状態では非表示 */
+  opacity: 0; /* トランジション用に追加 */
+  transition: opacity 0.3s; /* トランジションの追加 */
+  z-index: 9998;
+}
+
+.filter-overlay.show {
+  visibility: visible;
+  opacity: 1; /* トランジション用に追加 */
+}
+
+#filter-container {
+  width: 1000px;
+  background-color: #fff;
+  position: fixed;
+  flex-direction: column;
+  z-index: 9999;
+  border-radius: 8px;
+}
+
+.filter-item-container {
+  margin: 36px;
+}
+
+#filter-container-title {
+  background-color: #428f7c;
+  padding: 12px 16px;
+  border-radius: 8px 8px 0 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.filter-title {
+  margin-bottom: 8px;
+}
+
+.filter-custom-select {
+  position: relative;
+  margin-bottom: 36px;
+}
+
+.filter-selectbox {
+  display: flex;
+  flex-flow: column;
+  padding: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #333;
+  border-bottom: 1px solid #333;
+}
+
+.filter-selectbox.gray {
+  color: gray;
+}
+
+.filter-selectbox-items-container {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  z-index: 10;
+  overflow-y: auto; /* アイテムが多い場合にスクロール可能にする */
+  max-height: 250px; /* 適宜調整してください */
+}
+
+.filter-selectbox-items-container.show {
+  display: block;
+}
+
+.filter-selectbox-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.filter-selectbox-item:hover {
+  background-color: #d4f1f0;
+}
+
+.filter-selectbox-item input {
+  margin-right: 10px;
+}
+
+.filter-selectbox-item.checked {
+  background-color: #d4f1f0;
+}
+
+/* チェックボックスを隠す */
+.filter-selectbox-item input[type=checkbox] {
+  display: none;
+}
+
+/* カスタムチェックボックスのスタイル */
+.filter-selectbox-item label {
+  position: relative;
+  padding-left: 25px;
+  cursor: pointer;
+  display: inline-block;
+}
+
+/* カスタムチェックボックスの未チェック状態 */
+.filter-selectbox-item label::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 3px;
+}
+
+/* カスタムチェックボックスのチェック状態 */
+.filter-selectbox-item input[type=checkbox]:checked + label::before {
+  content: "✔";
+  background: #428f7c; /* お好みの色に変更してください */
+  color: white;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* カスタムチェックボックスのチェック状態を強調 */
+.filter-selectbox-item input[type=checkbox]:checked + label {
+  color: #428f7c; /* お好みの色に変更してください */
+}
+
+.filter-button-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+  margin-top: 38px;
+}
+
+.filter-button {
+  padding: 10px;
+  border-radius: 4px;
+  width: 120px;
+  text-align: center;
+  border: 1.5px solid var(--SubColor, #00BA8D);
+  cursor: pointer;
+}
+
+.filter-button-ok {
+  color: #fff;
+  background: var(--KeyGradation-horizontal, linear-gradient(270deg, #00CD0A 0%, #00C63D 0%, #00BA8D 100%));
+  font-weight: bold;
+}
+
+.filter-button-cancel {
+  background-color: #fff;
+  color: #009f79;
+}
+
+#heatmap-bar-version-update-button {
+  background: #006d8f;
+}
+#heatmap-bar-version-update-button:hover {
+  background: rgb(0, 89.5629370629, 117.5);
+  opacity: 1;
+}
+#heatmap-bar-version-update-button i {
+  margin-right: 4px;
+}/*# sourceMappingURL=heatmap-view-wp.css.map */

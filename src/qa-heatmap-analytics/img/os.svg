@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" preserveAspectRatio="xMidYMid" width="100" height="80" viewBox="0 0 100 80">
+  <defs>
+    <style>
+      .cls-1, .cls-2 {
+        font-size: 42px;
+      }
+
+      .cls-2 {
+        fill: #fff;
+        font-family: "Corbel-Bold";
+        font-weight: bold;
+      }
+    </style>
+  </defs>
+  <text x="22" y="53" class="cls-1"><tspan class="cls-2">OS</tspan></text>
+  <image xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFkAAABFAgMAAABccaLcAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAACVBMVEUAAAD///8AAABzxoNxAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAJcEhZcwAACxIAAAsSAdLdfvwAAABuSURBVDjL7dWxEcAgDANAU2QE9vEIFGH/VYIJRcCS79Jb5RdWJ4tId1EZubzf5tV7NwdshwryBs/PAnTeCpiv9m+qFc+SPeV1PV1idzwK0tPT0yNX5/HOtJPXXuF9+7uTbG/ZPrM9p/vP/gX+Lw/qRrahrdjZxQAAAABJRU5ErkJggg==" x="6" y="5" width="89" height="69"/>
+</svg>
