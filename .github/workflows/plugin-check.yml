@@ -2,6 +2,15 @@ name: Plugin Check
 
 # QA Assistants 本体（src/qa-heatmap-analytics/）を WordPress.org の Plugin Check に通す。
 # 詳細: https://github.com/WordPress/plugin-check-action
+#
+# 失敗時の対応フロー:
+#   このリポジトリ（qa-assistants）の src/qa-heatmap-analytics/ は qa-platform からの
+#   sync で配置される配布物のため、ここで直接修正してはいけません（次回 sync で上書き）。
+#   FAIL した場合:
+#     1. qa-platform 側で src/qa-heatmap-analytics/ を修正
+#     2. リリースブランチ（release-qahm-X.X.X.X）に反映
+#     3. sync-to-public.yml を再実行 → ここで再度 Plugin Check が走る
+#   緊急修正が必要な場合は qa-platform で hotfix → 即 sync の流れ。
 
 on:
   push:
@@ -9,6 +18,9 @@ on:
     paths:
       - 'src/qa-heatmap-analytics/**'
       - '.github/workflows/plugin-check.yml'
+  # pull_request トリガーは PR が auto-close される前に CI が走ることで、
+  # 提案者に「なぜ受け付けられないか」とは別に「品質チェックの結果」を返す意図。
+  # 不要と判断したら削除可。
   pull_request:
     paths:
       - 'src/qa-heatmap-analytics/**'

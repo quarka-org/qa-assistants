@@ -1,0 +1,20 @@
+# 改行コードの恒久対策
+# Windows ランナー / Windows ローカルからの操作で発生する LF <-> CRLF 変換による
+# 不要な diff（特に .github/workflows/ 配下）を防ぐ。
+#
+# 全テキストファイルを LF 固定とする（git の core.autocrlf 設定に依存しない）。
+* text=auto eol=lf
+
+# バイナリファイルは git の自動判定に任せる
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.otf binary

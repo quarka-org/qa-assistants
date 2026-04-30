@@ -28,6 +28,7 @@
 | [`docs/specs/assistant-rulebook-data.md`](docs/specs/assistant-rulebook-data.md) | **データ分析アシスタントを作るとき**（QAL マテリアル / data_sources / transform / tables） |
 | [`docs/specs/assistant-rulebook-config-api.md`](docs/specs/assistant-rulebook-config-api.md) | **設定変更アシスタントを作るとき**（config_read / config_write / permissions） |
 | [`docs/specs/assistant-manifest.md`](docs/specs/assistant-manifest.md) | 仕様書本体（疑問が出たら参照） |
+| [`docs/specs/assistant-rulebook.md`](docs/specs/assistant-rulebook.md) | basic / data / config-api を 1 つにまとめた **統合版**。通常は分割版（上 3 つ）を参照すれば十分だが、ChatGPT Custom GPT 等のナレッジに 1 ファイルで渡したい場合に使う |
 
 ---
 
