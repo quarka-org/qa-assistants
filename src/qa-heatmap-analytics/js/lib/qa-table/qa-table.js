@@ -73,7 +73,8 @@ class QATable {
             rowSelection: false, // 後方互換性のために残す
             maxHeight: null,
             initialSort: null,
-            stickyHeader: false // 新規追加：デフォルトOFF
+            stickyHeader: false,
+            columnToggle: false
         };
         
         this.container = typeof selector === 'string' 
@@ -84,19 +85,22 @@ class QATable {
             throw new Error(this.__('Container not found: ') + selector);
         }
         
-        // 2次元配列かどうかを判定
-        const is2DArray = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]);
-        
+        // 2次元配列かどうかを判定（インスタンスプロパティとして保持）
+        this.is2DArray = Array.isArray(data) && data.length > 0 && Array.isArray(data[0]);
+
         // データを保存（2次元配列の場合はコピーせずに参照を保持してメモリ使用量を削減）
         this.data = Array.isArray(data) ? data : [];
         this.columns = Array.isArray(columns) ? columns : [];
         this.options = { ...defaultOptions, ...options };
         
         if (this.options.stickyHeader) {
+            // インスタンスごとにスコープされた sticky スタイルを適用
+            const instanceId = 'qa-table-' + Math.random().toString(36).substring(2, 11);
+            this.container.setAttribute('data-qa-table-id', instanceId);
             const style = document.createElement('style');
             // topの値は0pxだと後ろの文字がはみ出る現象が発生したため、-2pxに調整
             style.textContent = `
-                .qa-table thead th {
+                [data-qa-table-id="${instanceId}"] .qa-table thead th {
                     position: sticky;
                     top: -2px;
                     z-index: 10;
@@ -108,12 +112,11 @@ class QATable {
         this.columnSelections = {};
         
         // 2次元配列の場合はコピーせずに参照を保持してメモリ使用量を削減
-        this.filteredData = is2DArray ? this.data : [...this.data];
+        this.filteredData = this.is2DArray ? this.data : [...this.data];
         this.currentPage = 1;
         this.perPage = this.options.perPage;
         this.sortState = [];
         this.filters = [];
-        this.selectedRows = new Set();
         
         const stringFilterOptions = [
             { value: QA_FILTER_TYPES.CONTAINS, label: this.__('Contains') },
@@ -193,13 +196,27 @@ class QATable {
 
         const optionContainer = document.createElement('div');
         optionContainer.className = 'qa-table-option-container';
-        
+
         if (this.options.filtering) {
             this._createFilteringUI(optionContainer);
         }
-        
-        if (this.options.exportable) {
-            this._createExportButtons(optionContainer);
+
+        // 右側のツールボタン群をまとめるコンテナ
+        const hasTools = this.options.exportable || this.options.columnToggle;
+        if (hasTools) {
+            const toolsContainer = document.createElement('div');
+            toolsContainer.className = 'qa-table-tools';
+
+            if (this.options.columnToggle) {
+                this._restoreColumnVisibility();
+                this._createColumnToggleUI(toolsContainer);
+            }
+
+            if (this.options.exportable) {
+                this._createExportButtons(toolsContainer);
+            }
+
+            optionContainer.appendChild(toolsContainer);
         }
 
 		tableContainer.appendChild(optionContainer);
@@ -220,10 +237,8 @@ class QATable {
         
         const table = document.createElement('table');
         table.className = 'qa-table';
-        
-        const thead = document.createElement('thead');
-        const headerRow = document.createElement('tr');
-        
+
+        // check型カラムの選択状態を初期化
         this.columns.forEach(column => {
             if (column.type === 'check') {
                 if (!this.columnSelections[column.key]) {
@@ -231,70 +246,32 @@ class QATable {
                 }
             }
         });
-        
-        this.columns.forEach(column => {
-            if (column.hidden === true) {
-                return;
-            }
-            
-            const th = document.createElement('th');
-            
-            // Set column width if specified
-            if (column.width) {
-                th.style.width = column.width + '%';
-            }
-            
-            if (this.options.sortable && column.sortable !== false) {
-                const headerContent = document.createElement('div');
-                headerContent.className = 'qa-sort-header';
-                
-                const headerText = document.createElement('span');
-                headerText.textContent = column.label || column.key;
-                
-                const sortIcon = document.createElement('span');
-                sortIcon.className = 'qa-sort-icon';
-                
-                headerContent.appendChild(headerText);
-                headerContent.appendChild(sortIcon);
-                th.appendChild(headerContent);
-                
-                th.addEventListener('click', (e) => {
-                    // CtrlキーまたはCommandキーでマルチソート
-                    const isMultiSort = e.ctrlKey || e.metaKey;
-                    this._handleSort(column.key, isMultiSort);
-                });
-                
-                th.classList.add('qa-sortable');
-            } else {
-                th.textContent = column.label || column.key;
-                th.classList.add('qa-not-sortable'); // Add not-sortable class
-            }
-            
-            headerRow.appendChild(th);
-        });
-        
-        thead.appendChild(headerRow);
+
+        const thead = document.createElement('thead');
         table.appendChild(thead);
-        
+
         const tbody = document.createElement('tbody');
         table.appendChild(tbody);
-        
+
         // Only add the table to the scroll container
         tableScrollContainer.appendChild(table);
-        
+
         // Add the scroll container to the table container
         tableContainer.appendChild(tableScrollContainer);
-        
+
         // Add pagination outside the scroll container but inside the table container
         if (this.options.pagination) {
             const paginationContainer = document.createElement('div');
             paginationContainer.className = 'qa-pagination';
             tableContainer.appendChild(paginationContainer);
         }
-        
+
         // Add the table container to the main container
         mainContainer.appendChild(tableContainer);
         this.container.appendChild(mainContainer);
+
+        // DOM ツリーに追加後にヘッダーを描画（querySelector で検索可能になる）
+        this._renderHeader();
         
         // Set initial sort if specified
         if (this.options.initialSort) {
@@ -324,6 +301,249 @@ class QATable {
         return text;
     }
     
+    // ヘッダー描画
+    _renderHeader() {
+        const table = this.container.querySelector('.qa-table');
+        if (!table) return;
+
+        const thead = table.querySelector('thead');
+        if (!thead) return;
+
+        thead.innerHTML = '';
+        const headerRow = document.createElement('tr');
+
+        this.columns.forEach(column => {
+            if (column.hidden === true) {
+                return;
+            }
+
+            const th = document.createElement('th');
+
+            // Set column width if specified
+            if (column.width) {
+                th.style.width = column.width + '%';
+            }
+
+            if (this.options.sortable && column.sortable !== false) {
+                const headerContent = document.createElement('div');
+                headerContent.className = 'qa-sort-header';
+
+                const headerText = document.createElement('span');
+                headerText.textContent = column.label || column.key;
+
+                const sortIcon = document.createElement('span');
+                sortIcon.className = 'qa-sort-icon';
+
+                headerContent.appendChild(headerText);
+                headerContent.appendChild(sortIcon);
+                th.appendChild(headerContent);
+
+                th.addEventListener('click', (e) => {
+                    // CtrlキーまたはCommandキーでマルチソート
+                    const isMultiSort = e.ctrlKey || e.metaKey;
+                    this._handleSort(column.key, isMultiSort);
+                });
+
+                th.classList.add('qa-sortable');
+            } else {
+                th.textContent = column.label || column.key;
+                th.classList.add('qa-not-sortable');
+            }
+
+            headerRow.appendChild(th);
+        });
+
+        thead.appendChild(headerRow);
+
+        // ソートアイコンを復元
+        if (this.sortState.length > 0) {
+            this._updateSortIcons();
+        }
+    }
+
+    // ヘッダーとテーブル本体をまとめて再描画
+    render() {
+        this._renderHeader();
+        this._renderTable();
+    }
+
+    /**
+     * カラムの表示/非表示を切り替える
+     * @param {string} columnKey - カラムキー
+     * @param {boolean} visible - true で表示、false で非表示
+     */
+    setColumnVisibility(columnKey, visible) {
+        const column = this.columns.find(col => col.key === columnKey);
+        if (!column) {
+            console.error(this.__('Column not found: ') + columnKey);
+            return this;
+        }
+        column.hidden = !visible;
+        this._refreshFilterColumnOptions();
+        this._saveColumnVisibility();
+        this._updateColumnToggleCheckboxes();
+        this.render();
+        return this;
+    }
+
+    /**
+     * 現在表示中のカラム一覧を取得する
+     * @returns {Array} 表示中のカラム定義の配列
+     */
+    getVisibleColumns() {
+        return this.columns.filter(col => col.hidden !== true);
+    }
+
+    /**
+     * 複数カラムの表示/非表示を一括で切り替える
+     * @param {Object} map - { columnKey: visible(boolean), ... }
+     */
+    setColumnsVisibility(map) {
+        Object.entries(map).forEach(([key, visible]) => {
+            const col = this.columns.find(c => c.key === key);
+            if (col) col.hidden = !visible;
+        });
+        this._refreshFilterColumnOptions();
+        this._saveColumnVisibility();
+        this._updateColumnToggleCheckboxes();
+        this.render();
+        return this;
+    }
+
+    // --- 列切り替え UI ---
+
+    /**
+     * 列切り替えトグル対象のカラム一覧を取得する
+     * 以下はトグル対象外:
+     * - initialHidden（コンストラクタ時点で hidden: true）
+     * - type: 'check'（チェックボックス列）
+     */
+    _getToggleableColumns() {
+        return this.columns.filter(col => !col._initialHidden && col.type !== 'check');
+    }
+
+    /**
+     * 列切り替え UI を生成する
+     */
+    _createColumnToggleUI(container) {
+        const toggleContainer = document.createElement('div');
+        toggleContainer.className = 'qa-column-toggle-container';
+
+        const toggleButton = document.createElement('button');
+        toggleButton.className = 'qa-column-toggle-button qa-export-button';
+        toggleButton.title = this.__('Column visibility');
+        toggleButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg> ' + this.__('Columns');
+        toggleButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const dropdown = toggleContainer.querySelector('.qa-column-toggle-dropdown');
+            if (dropdown) {
+                dropdown.classList.toggle('qa-column-toggle-dropdown--open');
+            }
+        });
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'qa-column-toggle-dropdown';
+
+        const toggleableColumns = this._getToggleableColumns();
+        toggleableColumns.forEach(column => {
+            const label = document.createElement('label');
+            label.className = 'qa-column-toggle-item';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = column.hidden !== true;
+            checkbox.dataset.columnKey = column.key;
+            checkbox.addEventListener('change', () => {
+                this.setColumnVisibility(column.key, checkbox.checked);
+            });
+
+            const text = document.createElement('span');
+            text.textContent = column.label || column.key;
+
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            dropdown.appendChild(label);
+        });
+
+        toggleContainer.appendChild(toggleButton);
+        toggleContainer.appendChild(dropdown);
+        container.appendChild(toggleContainer);
+
+        this.columnToggleContainer = toggleContainer;
+
+        // ドロップダウン外をクリックしたら閉じる
+        document.addEventListener('click', (e) => {
+            if (!toggleContainer.contains(e.target)) {
+                const dd = toggleContainer.querySelector('.qa-column-toggle-dropdown');
+                if (dd) dd.classList.remove('qa-column-toggle-dropdown--open');
+            }
+        });
+    }
+
+    /**
+     * 列切り替え UI のチェックボックス状態を同期する
+     */
+    _updateColumnToggleCheckboxes() {
+        if (!this.columnToggleContainer) return;
+        const checkboxes = this.columnToggleContainer.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+            const col = this.columns.find(c => c.key === cb.dataset.columnKey);
+            if (col) cb.checked = col.hidden !== true;
+        });
+    }
+
+    /**
+     * 列の表示/非表示状態を localStorage に保存する
+     */
+    _saveColumnVisibility() {
+        if (!this.options.columnToggle) return;
+        const storageKey = this._getStorageKey();
+        const state = {};
+        this._getToggleableColumns().forEach(col => {
+            state[col.key] = col.hidden !== true;
+        });
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(state));
+        } catch (e) {
+            // localStorage が使えない環境では無視
+        }
+    }
+
+    /**
+     * localStorage から列の表示/非表示状態を復元する
+     */
+    _restoreColumnVisibility() {
+        // initialHidden を記録（トグル対象外の判別に使用）
+        this.columns.forEach(col => {
+            col._initialHidden = col.hidden === true;
+        });
+
+        const storageKey = this._getStorageKey();
+        try {
+            const saved = localStorage.getItem(storageKey);
+            if (!saved) return;
+            const state = JSON.parse(saved);
+            Object.entries(state).forEach(([key, visible]) => {
+                const col = this.columns.find(c => c.key === key);
+                if (col && !col._initialHidden) {
+                    col.hidden = !visible;
+                }
+            });
+        } catch (e) {
+            // パースエラー時は無視
+        }
+    }
+
+    /**
+     * localStorage のキーを生成する
+     */
+    _getStorageKey() {
+        const selectorId = typeof this.container.id === 'string' && this.container.id
+            ? this.container.id
+            : this.container.className;
+        return 'qa-table-columns-' + selectorId;
+    }
+
     // テーブル描画
     _renderTable() {
         const table = this.container.querySelector('.qa-table');
@@ -377,7 +597,7 @@ class QATable {
             const emptyCell = document.createElement('td');
             
             // 行選択列を含む全カラム数を計算
-            let totalColumnCount = this.columns.filter(col => col.hidden !== true).length;
+            let totalColumnCount = this._getVisibleColumnCount();
             
             // 行選択オプションが有効な場合、カラム数に1を追加
             if (this.options.rowSelection) {
@@ -609,12 +829,7 @@ class QATable {
         
         const filterContainer = document.createElement('div');
         filterContainer.className = 'qa-filter-container';
-        
-        const filterTitle = document.createElement('div');
-        filterTitle.className = 'qa-filter-title';
-        filterTitle.textContent = this.__('Filters');
-        filterContainer.appendChild(filterTitle);
-        
+
         const filterForm = document.createElement('div');
         filterForm.className = 'qa-filter-form';
         
@@ -728,6 +943,34 @@ class QATable {
         this._updateFilterList();
     }
     
+    // フィルタのカラム選択肢を現在の columns 状態に同期する
+    _refreshFilterColumnOptions() {
+        if (!this.filterContainer) return;
+        const columnSelect = this.filterContainer.querySelector('.qa-filter-column');
+        if (!columnSelect) return;
+
+        const currentValue = columnSelect.value;
+        columnSelect.innerHTML = '';
+
+        this.columns.forEach(column => {
+            if (column.hidden === true || column.filtering === false) {
+                return;
+            }
+            const option = document.createElement('option');
+            option.value = column.key;
+            option.textContent = column.label || column.key;
+            columnSelect.appendChild(option);
+        });
+
+        // 以前の選択値が残っていれば復元
+        if (currentValue && columnSelect.querySelector(`option[value="${currentValue}"]`)) {
+            columnSelect.value = currentValue;
+        }
+
+        // フィルタタイプの選択肢も更新
+        columnSelect.dispatchEvent(new Event('change'));
+    }
+
     // フィルタ一覧を更新
     _updateFilterList() {
         if (!this.filterList) return;
@@ -735,17 +978,8 @@ class QATable {
         this.filterList.innerHTML = '';
         
         if (this.filters.length === 0) {
-            const emptyMessage = document.createElement('div');
-            emptyMessage.className = 'qa-filter-empty';
-            emptyMessage.textContent = this.__('No filters applied');
-            this.filterList.appendChild(emptyMessage);
             return;
         }
-        
-        const filtersTitle = document.createElement('div');
-        filtersTitle.className = 'qa-filters-title';
-        filtersTitle.textContent = this.__('Applied filters:');
-        this.filterList.appendChild(filtersTitle);
         
         const tagsContainer = document.createElement('div');
         tagsContainer.className = 'qa-filter-tags';
@@ -810,7 +1044,7 @@ class QATable {
     // フィルタクリア
     clearFilters() {
         this.filters = [];
-        this.filteredData = [...this.data];
+        this.filteredData = this.is2DArray ? this.data : [...this.data];
         this.currentPage = 1;
         this._renderTable();
         
@@ -820,7 +1054,7 @@ class QATable {
     // フィルタ適用
     _applyFilters() {
         if (this.filters.length === 0) {
-            this.filteredData = [...this.data];
+            this.filteredData = this.is2DArray ? this.data : [...this.data];
             return;
         }
         
@@ -1078,23 +1312,11 @@ class QATable {
         this.sortState.forEach((sortItem, index) => {
             const column = this.columns.find(col => col.key === sortItem.column);
             if (!column) return;
-            
-            const columnIndex = this.columns.indexOf(column);
+
             const headers = this.container.querySelectorAll('.qa-sortable');
-            
-            // 非表示カラムを考慮したインデックス調整
-            let visibleIndex = 0;
-            let targetHeader = null;
-            
-            for (let i = 0; i <= columnIndex; i++) {
-                if (this.columns[i].hidden !== true) {
-                    if (i === columnIndex) {
-                        targetHeader = headers[visibleIndex];
-                    }
-                    visibleIndex++;
-                }
-            }
-            
+            const visibleIndex = this._getVisibleColumnIndex(sortItem.column);
+            const targetHeader = visibleIndex >= 0 ? headers[visibleIndex] : null;
+
             if (targetHeader) {
                 // ヘッダーにソート状態のクラスを追加
                 targetHeader.classList.add('qa-sorted');
@@ -1244,23 +1466,13 @@ class QATable {
             return false;
         }
         
-        let columnIndex = -1;
-        let visibleColumnIndex = 0;
-        
-        for (let i = 0; i < this.columns.length; i++) {
-            if (this.columns[i].hidden) continue;
-            if (this.columns[i].key === columnKey) {
-                columnIndex = i;
-                break;
-            }
-            visibleColumnIndex++;
-        }
-        
-        if (columnIndex === -1) {
+        const visibleColumnIndex = this._getVisibleColumnIndex(columnKey);
+
+        if (visibleColumnIndex === -1) {
             console.error(`Column with key "${columnKey}" not found or is hidden`);
             return false;
         }
-        
+
         console.log(`Found column "${columnKey}" at visible index ${visibleColumnIndex}`);
         
         if (rowId !== null && (typeof rowId === 'number' || (typeof rowId === 'string' && !isNaN(parseInt(rowId))))) {
@@ -1660,14 +1872,16 @@ class QATable {
         
         const csvButton = document.createElement('button');
         csvButton.className = 'qa-export-button qa-export-csv';
-        csvButton.textContent = this.__('CSV Export');
+        csvButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> CSV';
+        csvButton.title = this.__('CSV Export');
         csvButton.addEventListener('click', () => {
             this.exportToCSV();
         });
-        
+
         const jsonButton = document.createElement('button');
         jsonButton.className = 'qa-export-button qa-export-json';
-        jsonButton.textContent = this.__('JSON Export');
+        jsonButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> JSON';
+        jsonButton.title = this.__('JSON Export');
         jsonButton.addEventListener('click', () => {
             this.exportToJSON();
         });
@@ -1781,15 +1995,15 @@ class QATable {
         // ローディングスピナーを表示
         this.showLoading();
         
-        // 2次元配列かどうかを判定
-        const is2DArray = newData.length > 0 && Array.isArray(newData[0]);
-        
+        // 2次元配列かどうかを判定（インスタンスプロパティを更新）
+        this.is2DArray = newData.length > 0 && Array.isArray(newData[0]);
+
         // データを更新（2次元配列の場合はコピーせずに参照を保持してメモリ使用量を削減）
         this.data = newData;
-        this.filteredData = is2DArray ? newData : [...newData];
-        
+        this.filteredData = this.is2DArray ? newData : [...newData];
+
         this.filteredData.forEach((row, index) => {
-            if (is2DArray) {
+            if (this.is2DArray) {
                 row._rowId = index + 1;
             } else {
                 row._rowId = row.internalId || (index + 1);
@@ -1821,9 +2035,6 @@ class QATable {
                 });
             }
         });
-        
-        // 選択状態をリセット
-        this.selectedRows.clear();
         
         // フィルタを適用（フィルタがある場合）
         if (this.filters.length > 0) {
@@ -1864,15 +2075,36 @@ class QATable {
     _getDataValue(item, key) {
         // 2次元配列のデータ処理
         if (Array.isArray(item)) {
-            // 'active' キーの場合は明示的にインデックス9を返す
-            if (key === 'active') {
-                return item[9];
-            }
             const columnIndex = typeof key === 'number' ? key : this.columns.findIndex(col => col.key === key);
             return columnIndex >= 0 && columnIndex < item.length ? item[columnIndex] : undefined;
         }
         // オブジェクト形式のデータ処理
         return item[key];
+    }
+
+    /**
+     * 非表示カラムを考慮した表示上のカラムインデックスを取得する
+     * @param {string} columnKey - カラムキー
+     * @returns {number} - 表示上のインデックス（非表示カラムの場合は -1）
+     */
+    _getVisibleColumnIndex(columnKey) {
+        let visibleIndex = 0;
+        for (let i = 0; i < this.columns.length; i++) {
+            if (this.columns[i].hidden === true) continue;
+            if (this.columns[i].key === columnKey) {
+                return visibleIndex;
+            }
+            visibleIndex++;
+        }
+        return -1;
+    }
+
+    /**
+     * 表示中のカラム数を取得する
+     * @returns {number} - 表示中のカラム数
+     */
+    _getVisibleColumnCount() {
+        return this.columns.filter(col => col.hidden !== true).length;
     }
 
     /**

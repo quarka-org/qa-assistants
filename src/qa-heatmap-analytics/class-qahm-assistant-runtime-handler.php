@@ -119,7 +119,7 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$query_raw = isset( $_POST['query'] ) ? wp_unslash( $_POST['query'] ) : '';
 		$query     = json_decode( $query_raw, true );
 
-		if ( ! is_array( $query ) || empty( $query['material'] ) ) {
+		if ( ! is_array( $query ) ) {
 			wp_send_json_error( array( 'message' => 'Invalid query parameter.' ) );
 			return;
 		}
@@ -129,11 +129,26 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			$tracking_id = 'all';
 		}
 
-		// Convert manifest simplified query to QAL native format
-		$qal_native = $this->convert_to_qal_native( $query, $tracking_id );
+		$type = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'type' ) );
+		if ( empty( $type ) ) {
+			$type = 'qal';
+		}
 
-		if ( isset( $qal_native['error'] ) ) {
-			wp_send_json_error( array( 'message' => $qal_native['error'] ) );
+		if ( 'native_qal' === $type ) {
+			$qal_native                 = $query;
+			$qal_native['tracking_id']  = $tracking_id;
+		} elseif ( 'qal' === $type ) {
+			if ( empty( $query['material'] ) ) {
+				wp_send_json_error( array( 'message' => 'Invalid query parameter.' ) );
+				return;
+			}
+			$qal_native = $this->convert_to_qal_native( $query, $tracking_id );
+			if ( isset( $qal_native['error'] ) ) {
+				wp_send_json_error( array( 'message' => $qal_native['error'] ) );
+				return;
+			}
+		} else {
+			wp_send_json_error( array( 'message' => 'Unknown type: ' . $type ) );
 			return;
 		}
 
@@ -148,12 +163,17 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$executable_qal = $qahm_qal_executor->qal_build_execute_plan( array( 'qal' => $qal_native ) );
 
 		if ( isset( $executable_qal['error_code'] ) ) {
-			wp_send_json_error(
-				array(
-					'message'    => isset( $executable_qal['message'] ) ? $executable_qal['message'] : 'QAL validation failed.',
-					'error_code' => $executable_qal['error_code'],
-				)
+			$error_payload = array(
+				'message'    => isset( $executable_qal['message'] ) ? $executable_qal['message'] : 'QAL validation failed.',
+				'error_code' => $executable_qal['error_code'],
 			);
+			if ( isset( $executable_qal['location'] ) ) {
+				$error_payload['location'] = $executable_qal['location'];
+			}
+			if ( isset( $executable_qal['details'] ) ) {
+				$error_payload['details'] = $executable_qal['details'];
+			}
+			wp_send_json_error( $error_payload );
 			return;
 		}
 
@@ -161,12 +181,17 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$response = $qahm_qal_executor->qal_executor( $executable_qal );
 
 		if ( isset( $response['error_code'] ) ) {
-			wp_send_json_error(
-				array(
-					'message'    => isset( $response['message'] ) ? $response['message'] : 'QAL execution failed.',
-					'error_code' => $response['error_code'],
-				)
+			$error_payload = array(
+				'message'    => isset( $response['message'] ) ? $response['message'] : 'QAL execution failed.',
+				'error_code' => $response['error_code'],
 			);
+			if ( isset( $response['location'] ) ) {
+				$error_payload['location'] = $response['location'];
+			}
+			if ( isset( $response['details'] ) ) {
+				$error_payload['details'] = $response['details'];
+			}
+			wp_send_json_error( $error_payload );
 			return;
 		}
 
