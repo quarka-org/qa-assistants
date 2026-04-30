@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "name": "サンプルアシスタント",
+    "description": "マニフェストランタイムの全機能テスト用"
+  },
+  "msg": {
+    "welcome": "こんにちは！**サンプルアシスタント**です。\nサイトのページパフォーマンスを分析します。",
+    "select_period": "分析する期間を選んでください。",
+    "analyzing": "{$date_from} から {$date_to} のデータを取得しています...",
+    "result_summary": "**{$page_count|integer}ページ**を分析しました。\n合計 **{$total_pv|integer} PV**",
+    "select_page": "詳細を見たいページを選んでください。",
+    "detail_title": "**{$selected_title}** の詳細です。",
+    "detail_url": "URL: [{$selected_url}]({$selected_url})",
+    "no_data": "指定された期間にデータが見つかりませんでした。\n別の期間を試してみてください。",
+    "error": "データの取得中にエラーが発生しました。\nしばらく待ってから再度お試しください。"
+  },
+  "btn": {
+    "7days": "過去7日間",
+    "14days": "過去14日間",
+    "30days": "過去30日間",
+    "back": "一覧に戻る",
+    "restart": "最初に戻る"
+  },
+  "tbl": {
+    "pages": "ページ一覧"
+  },
+  "col": {
+    "title": "ページタイトル",
+    "url": "URL",
+    "pv": "PV",
+    "avg_time": "平均滞在時間"
+  }
+}

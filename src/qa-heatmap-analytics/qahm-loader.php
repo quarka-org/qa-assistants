@@ -204,47 +204,109 @@ if ( QAHM_TYPE === QAHM_TYPE_ZERO ) {
 $qahm_loadtime = ( microtime( true ) - $qahm_time_start );
 $qahm_loadtime = round( $qahm_loadtime, 5 );
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // === QA-LABO-LOADER START ===
 // WARNING: このセクションは自動生成されます。直接編集しないでください！
 // labo固有の機能を追加する場合は src/core/qa-labo-loader.php を編集してください。
 // 詳細は qa-labo-loader.php のコメントを参照してください。
 /**
- * QA Labo専用ローダー
+ * qa-labo-loader.php
  *
- * ============================================================================
- * 重要: qa-laboでlabo固有の機能を追加する場合は、このファイルを編集してください。
- * qahm-loader.phpを直接編集しないでください！
- * ============================================================================
+ * qa-labo固有のインクルード定義
+ * このファイルの内容は apply-labo-loader.sh によって qahm-loader.php にマージされます。
  *
- * このファイルはqa-labo環境専用の開発中ツールの読み込み処理を記述します。
- * qa-platformとqa-labo間の自動マージ時に、このファイルの内容が
- * qahm-loader.phpに追記されることで、labo固有の機能が有効化されます。
+ * 使用方法:
+ *   1. 新規クラスのrequire_onceをこのファイルに追加
+ *   2. ./scripts/apply-labo-loader.sh を実行
+ *   3. qahm-loader.php がマージされた状態になる
  *
- * 【なぜqahm-loader.phpを直接編集してはいけないのか】
- * qa-platformからqa-laboへの自動マージ時に、qahm-loader.phpはqa-platform側の
- * バージョンで上書きされます。その後、このファイル(qa-labo-loader.php)の内容が
- * 自動的に追記されます。直接qahm-loader.phpを編集すると、次回のマージで
- * その変更が失われてしまいます。
- *
- * 【正しいワークフロー】
- * 1. このファイル(qa-labo-loader.php)にlabo固有のrequire文を追加
- * 2. scripts/apply-labo-loader.sh を実行してqahm-loader.phpを更新
- *    （GitHub Actionsでは自動実行されます）
- * 3. 動作確認
- *
- * 【コーディングルール】
- * - qahm-loader.phpと同様、グローバルスコープでのrequireが必要です
- * - 関数化せず、直接requireを記述してください
- * - このファイルは双方向マージの対象外です（labo専用）
- *
- * @package QA_Labo
+ * 注意:
+ *   - qahm-loader.php は直接編集しないこと（夜間同期で上書きされる）
+ *   - このファイルに定義したものだけがlabo固有のインクルードとして追加される
  */
-// ============================================================================
-// qa-labo専用の開発中ツールをここに追加
-// ============================================================================
-//
-// 例:
-// if ( file_exists( dirname( __FILE__ ) . '/class-qahm-labo-tool.php' ) ) {
-//     require_once dirname( __FILE__ ) . '/class-qahm-labo-tool.php';
-// }
+// ColumnDB関連クラス（Phase 0: allpv列DB）
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-binary-io.php';
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-schema.php';
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-sessions.php';
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-daily-buffer.php';
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-writer.php';
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-cron.php';
+// ColumnDB関連クラス（T45: GSC列DB）
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-gsc-cron.php';
+// ColumnDB関連クラス（T48: GA4列DB）
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-ga4-cron.php';
+// ColumnDB関連クラス（Phase 1: click_event列DB + グローバルセレクタ）
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-dictionary.php';
+require_once dirname( __FILE__ ) . '/class-qahm-columndb-selectors.php';
+// ページタイプ判定（T42）
+require_once dirname( __FILE__ ) . '/class-qahm-page-type-detector.php';
+// API Gateway クライアント（T74）
+require_once dirname( __FILE__ ) . '/class-qahm-api-gateway-client.php';
 // === QA-LABO-LOADER END ===

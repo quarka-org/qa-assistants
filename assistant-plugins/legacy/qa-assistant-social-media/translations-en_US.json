@@ -1,0 +1,29 @@
+{
+    "config": {
+        "name": "Social Media Assistant",
+        "description": "Shows how your content is performing across various social media platforms.",
+		"author": "QuarkA"
+    },
+	"messages": {
+		"0": "Let's take a look at your social media performance. Choose a time range to begin.",
+		"10": "Here’s what happened over the past {$free} days.",
+		"20": "No social media traffic was detected for the selected period. Would you like to choose a different timeframe?",
+		"21": "Most of the traffic is coming from {$top_media}.",
+		"30": "Reviewing landing pages that received traffic from social media. Which platform would you like to focus on?",
+		"40": "Here are the landing pages that received social media traffic in the past {$free} days.",
+		"50": "Click a link to view posts from the corresponding account. You may also consider reaching out directly.",
+		"60": "Here is a summary of social media platforms that are directly contributing to revenue.",
+		"70": "It looks like YouTube is driving the most revenue. Next, let's review the accounts on each platform that contributed to that revenue. Please select a social media platform.",
+		"80": "These are the Instagram accounts contributing to your revenue.",
+		"90": "Click a link to view the corresponding account’s posts. You may also consider connecting directly.",
+		"100": "That concludes the social media overview. Consider engaging with users who interacted with your posts, or explore using social media ads to expand your reach."
+	},
+    "commands": {
+		"analyze_7": "Last 7 Days",
+		"analyze_14": "Last 14 Days",
+		"analyze_28": "Last 28 Days",
+		"analyze_90": "Last 90 Days",
+        "return_start": "Back to Start",
+        "next": "Next"
+    }
+}

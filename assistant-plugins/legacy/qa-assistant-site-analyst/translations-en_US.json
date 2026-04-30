@@ -1,0 +1,32 @@
+{
+    "config": {
+        "name": "Site Analyst",
+        "description": "Provides an overview of your site's performance, including sessions, pageviews, and traffic trends.",
+		"author": "QuarkA"
+    },
+    "messages": {
+        "0": "Get insights into recent sessions, pageviews, and trends by weekday and time of day. Choose a time range to continue.",
+        "10": "Starting user analysis for the past {$check_days} days. Please wait...",
+        "20": "Displayed a table of users, sessions, and pageviews for the past {$check_days} days.\nAlso, take a look at the weekly trends. For example, B2B sites often show lower traffic on weekends and holidays, while B2C sites tend to have more stable patterns.\nNext, we'll analyze traffic by device type. Click \"Next\" to continue.",
+        "30": "Now displaying device breakdown for the past {$check_days} days.\nAnalyzing environment-specific data...",
+        "40": "Here's a breakdown of users, sessions, and pageviews by OS and browser for the past {$check_days} days.\nB2B traffic mainly comes from desktop OS like Windows, while B2C sites often see higher smartphone traffic, especially from iPhones.\nRecently, usage of Edge on desktop has been rising, so it's worth monitoring. On mobile, check the iPhone-to-Android ratio.",
+        "50": "Finally, displaying total sessions by time of day and day of the week for the past {$check_days} days.",
+        "51": "The table above may look dense, but focus on time slots and days with higher numbers.\nPeak access times can help you decide when to send newsletters or LINE messages, so be sure to review closely.",
+        "60": "That wraps up the overview for the past {$check_days} days.",
+        "70": "Next, let's compare this data with the previous 7 days.",
+        "80": "Here are the key differences from the comparison.",
+        "90": "Now reviewing device-specific trends for the day with the biggest difference.",
+        "100": "Now showing session differences by day of week and time of day. Let's start with Monday through Wednesday.",
+        "110": "Next, here is the data for Thursday through Sunday.",
+        "120": "That concludes the overview for the previous 7 days."
+    },
+    "commands": {
+		"analyze_7": "Last 7 Days",
+		"analyze_28": "Last 28 Days",
+		"analyze_90": "Last 90 Days",
+        "next": "Next",
+        "return_start": "Back to Start",
+        "compare": "Compare with Previous Period",
+        "back_period": "Back to Period Selection"
+    }
+}

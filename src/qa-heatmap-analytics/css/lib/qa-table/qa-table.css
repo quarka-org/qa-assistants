@@ -1,196 +1,196 @@
-/* QA Table CSS */
+/*
+ * QA Table CSS
+ *
+ * Design basis: Carbon Design System (IBM) data table tokens
+ *   Row height:    48px (default)
+ *   Cell padding:  16px horizontal
+ *   Font size:     14px (header & body)
+ *   Borders:       horizontal only
+ *
+ * Principles: Linear (restraint), Stripe (data density)
+ */
+
+/* ===== Layout ===== */
 .qa-table-container {
-    margin-bottom: 20px;
+    width: 100%;
+    margin-bottom: 0;
 }
 
-/* Table container with max-height */
 .qa-table-main-container {
     position: relative;
-    border-radius: 4px;
+    width: 100%;
     overflow: hidden;
+    transition: opacity 0.3s ease;
 }
 
-/* Scroll container for just the table */
 .qa-table-scroll-container {
     width: 100%;
     overflow: auto;
 }
 
+.qa-table-container {
+    position: relative;
+}
+
+/* ===== Table ===== */
 .qa-table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 20px;
+    table-layout: fixed;
     font-size: 14px;
+    line-height: 1.4;
+    margin-bottom: 0;
+    color: #161616;
 }
 
-.qa-table th, 
+.qa-table th,
 .qa-table td {
-    padding: 10px;
-    border: 1px solid #ddd;
-	overflow-wrap: break-word;
-	word-wrap: break-word;
-	word-break: break-all;
+    padding: 12px 16px;
+    border: none;
+    border-bottom: 1px solid #e0e0e0;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-all;
 }
 
+/* ===== Header ===== */
 .qa-table th {
-    background-color: #f5f5f5;
-    font-weight: bold;
+    background-color: #f4f4f4;
+    font-weight: 600;
+    font-size: 14px;
     cursor: pointer;
     position: relative;
 }
 
 .qa-table th.qa-not-sortable,
 .qa-table th.qa-select-column {
-    cursor: not-allowed;
+    cursor: default;
 }
 
 .qa-table th:hover {
-    background-color: #e9e9e9;
+    filter: brightness(0.96);
 }
 
-/* Remove alternating row colors as requested */
+/* ===== Rows ===== */
 .qa-table tbody tr {
     background-color: #fff;
+    transition: background-color 0.1s ease;
 }
 
 .qa-table tbody tr:hover {
-    background-color: #f0f0f0;
+    background-color: #e8e8e8;
 }
 
-/* Pagination */
-.qa-pagination {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 24px;
+/* Last row no bottom border (container border handles it) */
+.qa-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
-.qa-pagination-info {
-    font-size: 14px;
-    color: #666;
-}
-
-.qa-pagination-controls {
-    display: flex;
-    align-items: center;
-}
-
-.qa-pagination button {
-    margin: 0 5px;
-    padding: 5px 10px;
-    border: 1px solid #ddd;
-    background-color: #fff;
-    color: #333; /* Ensure text is visible */
-    cursor: pointer;
-    border-radius: 3px;
-}
-
-.qa-pagination button.active {
-    background-color: #0073aa;
-    color: white;
-    border-color: #0073aa;
-}
-
-.qa-pagination button:hover:not(.active):not(:disabled) {
-    background-color: #f0f0f0;
-}
-
-/* Prevent hover color change on disabled buttons */
-.qa-pagination button:disabled:hover {
-    background-color: #fff;
-}
-
-.qa-pagination button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    color: #999; /* Ensure disabled text is still visible */
-}
-
-.qa-pagination-ellipsis {
-    display: inline-block;
-    padding: 5px 8px;
-    color: #666;
-}
-
-/* Option */
+/* ===== Toolbar ===== */
 .qa-table-option-container {
     display: flex;
     align-items: flex-end;
-	margin-bottom: 24px;
+    gap: 8px;
+    margin-bottom: 12px;
 }
 
-/* Filtering */
+/* ===== Filter ===== */
+.qa-filter-container {
+    flex: 1;
+}
+
 .qa-filter-title {
     margin-top: 0;
-    margin-bottom: 10px;
-    font-size: 16px;
-    font-size: 1.1em;
-    color: #333;
-    font-weight: bold;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #525252;
+    font-weight: 600;
 }
 
 .qa-filter-form {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
     flex-wrap: wrap;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 .qa-filter-column,
 .qa-filter-type,
 .qa-filter-value {
-    padding: 6px 10px;
-    border: 1px solid #ddd;
-    border-radius: 3px;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid #c6c6c6;
+    border-radius: 4px;
     font-size: 14px;
+    background-color: #f4f4f4;
+    color: #161616;
+    outline: none;
+}
+
+.qa-filter-column:focus,
+.qa-filter-type:focus,
+.qa-filter-value:focus {
+    border-color: #0f62fe;
+    box-shadow: inset 0 0 0 1px #0f62fe;
 }
 
 .qa-filter-value {
-    min-width: 150px;
+    min-width: 160px;
+    background-color: #fff;
 }
 
 .qa-filter-add,
 .qa-filter-clear {
-    padding: 7px 12px;
-    border: none;
-    border-radius: 3px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
+    font-weight: 400;
+    transition: background-color 0.1s ease;
 }
 
 .qa-filter-add {
-    background-color: #0073aa;
-    color: white;
+    background-color: #0f62fe;
+    color: #fff;
+    border: none;
 }
 
 .qa-filter-add:hover {
-    background-color: #0069d9;
+    background-color: #0353e9;
 }
 
 .qa-filter-clear {
-    background-color: #6c757d;
-    color: white;
+    background-color: #fff;
+    color: #161616;
+    border: 1px solid #c6c6c6;
 }
 
 .qa-filter-clear:hover {
-    background-color: #5a6268;
+    background-color: #e8e8e8;
 }
 
-/* Active filters */
+/* Active Filters */
 .qa-filter-list {
-    margin-top: 15px;
+    margin-top: 0;
+}
+
+.qa-filter-list:not(:empty) {
+    margin-top: 8px;
 }
 
 .qa-filter-empty {
-    color: #999;
+    color: #a8a8a8;
+    font-size: 12px;
     font-style: italic;
 }
 
 .qa-filters-title {
-    font-weight: bold;
-    margin-bottom: 8px;
-    color: #333;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: #525252;
 }
 
 .qa-filter-tags {
@@ -202,66 +202,164 @@
 .qa-filter-tag {
     display: inline-flex;
     align-items: center;
-    background-color: #e6f3ff;
-    border: 1px solid #b3d7ff;
-    border-radius: 3px;
-    padding: 4px 8px;
-    font-size: 13px;
+    background-color: #e0e0e0;
+    border: none;
+    border-radius: 100px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #161616;
 }
 
 .qa-filter-text {
-    margin-right: 5px;
+    margin-right: 8px;
 }
 
 .qa-filter-remove {
     background: none;
     border: none;
-    color: #999;
+    color: #525252;
     cursor: pointer;
     font-weight: bold;
-    padding: 0 4px;
+    padding: 0 2px;
     font-size: 14px;
+    line-height: 1;
 }
 
 .qa-filter-remove:hover {
-    color: #ff0000;
+    color: #da1e28;
 }
 
-/* Export buttons */
+/* ===== Tools (Export + Column Toggle) ===== */
+.qa-table-tools {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .qa-export-container {
-	margin-left: auto;
+    display: flex;
+    gap: 6px;
 }
 
 .qa-export-button {
-    padding: 7px 12px;
-    border: none;
-    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid #c6c6c6;
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
-	margin-left: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background-color: #fff;
+    color: #525252;
+    transition: background-color 0.1s ease;
+    margin-left: 0;
 }
 
-.qa-export-csv {
-    background-color: #28a745;
-    color: white;
-}
-
-.qa-export-csv:hover {
-    background-color: #218838;
-}
-
-.qa-export-json {
-    background-color: #17a2b8;
-    color: white;
-}
-
+.qa-export-csv:hover,
 .qa-export-json:hover {
-    background-color: #138496;
+    background-color: #e8e8e8;
 }
 
-/* Row selection */
+/* ===== Sort ===== */
+.qa-sort-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+}
+
+.qa-sort-icon {
+    font-size: 10px;
+    position: relative;
+    opacity: 0.85;
+}
+
+.qa-sort-icon[data-sort-index]:after {
+    content: attr(data-sort-index);
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    font-size: 8px;
+    background-color: rgba(255, 255, 255, 0.9);
+    color: #161616;
+    border-radius: 50%;
+    width: 12px;
+    height: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.qa-sort-asc,
+.qa-sort-desc {
+    color: inherit;
+}
+
+/* ===== Pagination ===== */
+.qa-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 48px;
+    padding: 0 16px;
+}
+
+.qa-pagination-info {
+    font-size: 13px;
+    color: #525252;
+}
+
+.qa-pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.qa-pagination button {
+    margin: 0;
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    background-color: transparent;
+    color: #525252;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 13px;
+    transition: background-color 0.1s ease;
+}
+
+.qa-pagination button.active {
+    background-color: #161616;
+    color: #fff;
+}
+
+.qa-pagination button:hover:not(.active):not(:disabled) {
+    background-color: #e0e0e0;
+}
+
+.qa-pagination button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.qa-pagination button:disabled:hover {
+    background-color: transparent;
+}
+
+.qa-pagination-ellipsis {
+    display: inline-block;
+    padding: 0 4px;
+    color: #a8a8a8;
+    font-size: 13px;
+}
+
+/* ===== Checkbox ===== */
 .qa-select-column {
-    width: 30px;
+    width: 40px;
 }
 
 .qa-select-cell {
@@ -273,7 +371,6 @@
     cursor: pointer;
 }
 
-/* Cell with checkbox */
 .qa-cell-with-checkbox {
     display: flex;
     align-items: center;
@@ -284,68 +381,28 @@
     margin: 0;
 }
 
-/* Disabled checkboxes */
 .qa-row-select:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
-/* Empty message */
-.qa-empty-message {
+.qa-checkbox-cell {
     text-align: center;
-    padding: 20px;
-    color: #999;
-    font-style: italic;
 }
 
-/* Sort icons */
-.qa-sort-header {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-.qa-sort-icon {
-    margin-left: 5px;
-    font-size: 10px;
-    position: relative;
-}
-
-.qa-sort-icon[data-sort-index]:after {
-    content: attr(data-sort-index);
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    font-size: 8px;
-    background-color: #0073aa;
-    color: white;
-    border-radius: 50%;
-    width: 12px;
-    height: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.qa-sort-asc {
-    color: #0073aa;
-}
-
-.qa-sort-desc {
-    color: #0073aa;
-}
-
-/* Column type specific styles */
+/* ===== Column Types ===== */
 .qa-column-number,
 .qa-column-integer,
 .qa-column-float,
 .qa-column-currency,
 .qa-column-percentage {
     text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
 .qa-column-duration {
-	text-align: center;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
 }
 
 .qa-column-date,
@@ -357,16 +414,12 @@
     text-align: center;
 }
 
-.qa-table-main-container {
-    position: relative;
-}
-
-/* 空データ表示のスタイル */
+/* ===== Empty State ===== */
 .qa-empty-message {
     padding: 0;
     text-align: center;
-    width: 100%; /* 幅を100%に設定 */
-    height: 100%; /* 高さを100%に設定 */
+    width: 100%;
+    height: 100%;
     display: table-cell;
     vertical-align: middle;
 }
@@ -378,64 +431,49 @@
     justify-content: center;
     width: 100%;
     height: 100%;
+    padding: 48px 0;
 }
 
 .qa-no-data-icon {
-    margin-bottom: 15px;
-    color: #999;
+    margin-bottom: 16px;
+    color: #c6c6c6;
 }
 
 .qa-no-data-text {
-    font-size: 16px;
-    color: #666;
-    font-weight: bold;
+    font-size: 14px;
+    color: #a8a8a8;
+    font-weight: 400;
 }
 
-/* テーブルの高さ設定用 */
-.qa-table-main-container {
-    position: relative;
-    transition: opacity 0.3s ease;
-}
-
-/* ローディング中のテーブル表示 */
-.qa-table-container {
-    position: relative;
-}
-
-/* Ensure table maintains column widths during loading */
-.qa-table {
-    table-layout: fixed;
-    border-collapse: collapse;
-    width: 100%;
-}
-
-/* CSS rules for icon column removed as per user feedback */
-
-/* Remove underlines from links in table */
+/* ===== Links ===== */
 .qa-table a {
     text-decoration: none;
+    color: #0f62fe;
 }
 
-/* Link column styling */
+.qa-table a:hover {
+    color: #0043ce;
+}
+
 .qa-column-link {
-    color: #0073aa;
+    color: #0f62fe;
 }
 
-/* Loading */
+/* ===== Loading ===== */
 .qa-table-loading-overlay {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(255, 255, 255, 0.8);
+    background-color: rgba(255, 255, 255, 0.85);
     display: flex;
     justify-content: center;
     align-items: center;
     z-index: 100;
     opacity: 1;
-    transition: opacity 0.5s ease;
-    pointer-events: none; /* Allow clicks to pass through */
+    transition: opacity 0.4s ease;
+    pointer-events: none;
 }
 
 .qa-table-loading-overlay.qa-hidden {
@@ -444,85 +482,135 @@
 }
 
 .qa-table-loading-icon-wrap {
-	position: absolute;
-	top: 280px;
-	left: 50%;
-	transform: translateX(-50%);
-	font-size: 20px;
+    position: absolute;
+    top: 280px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 20px;
 }
-
-/*
-上下左右中央配置
-.qa-table-loading-icon-wrap {
-	position: absolute;
-	top: 50%;
-	left: 50%;
-	transform: translate(-50%, -50%);
-	font-size: 20px;
-}
-*/
 
 .qa-table-loading-icon-text {
-	color: #666;
-	display: inline-block;
-	width: 170px;
-	margin-left: 8px;
+    color: #525252;
+    display: inline-block;
+    width: 170px;
+    margin-left: 8px;
 }
 
 .qa-table-loading-icon-text::after {
-	content: "";
-	display: inline-block;
-	width: 30px;
-	margin-left: 6px;
-	text-align: left;
-	animation: loadingDots 1.8s steps(1, end) infinite;
+    content: "";
+    display: inline-block;
+    width: 30px;
+    margin-left: 6px;
+    text-align: left;
+    animation: loadingDots 1.8s steps(1, end) infinite;
 }
 
 @keyframes loadingDots {
-	0%, 33.33% {
-		content: ".";
-	}
-	33.34%, 66.66% {
-		content: "..";
-	}
-	66.67%, 100% {
-		content: "...";
-	}
+    0%, 33.33% {
+        content: ".";
+    }
+    33.34%, 66.66% {
+        content: "..";
+    }
+    66.67%, 100% {
+        content: "...";
+    }
 }
 
 .qa-table-loading-icon-bounceball {
-	position: relative;
-	display: inline-block;
-	height: 35px;
-	width: 15px;
-	margin-right: 5px;
-	&:before {
-		position: absolute;
-		content: '';
-		display: block;
-		top: 0;
-		width: 15px;
-		height: 15px;
-		border-radius: 50%;
-		background-color: #666;
-		transform-origin: 50%;
-		animation: bounce 500ms alternate infinite ease;
-	}
+    position: relative;
+    display: inline-block;
+    height: 35px;
+    width: 15px;
+    margin-right: 5px;
+    &:before {
+        position: absolute;
+        content: '';
+        display: block;
+        top: 0;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        background-color: #a8a8a8;
+        transform-origin: 50%;
+        animation: bounce 500ms alternate infinite ease;
+    }
 }
 
 @keyframes bounce {
-	0% {
-		top: 30px;
-		height: 5px;
-		border-radius: 60px 60px 20px 20px;
-		transform: scaleX(2);
-	}
-	35% {
-		height: 15px;
-		border-radius: 50%;
-		transform: scaleX(1);
-	}
-	100% {
-		top: 0;
-	}
+    0% {
+        top: 30px;
+        height: 5px;
+        border-radius: 60px 60px 20px 20px;
+        transform: scaleX(2);
+    }
+    35% {
+        height: 15px;
+        border-radius: 50%;
+        transform: scaleX(1);
+    }
+    100% {
+        top: 0;
+    }
+}
+
+/* ===== Column Toggle ===== */
+.qa-column-toggle-container {
+    position: relative;
+    margin-left: 0;
+}
+
+.qa-column-toggle-button {
+    /* qa-export-button クラスとスタイル共有 */
+}
+
+.qa-column-toggle-button:hover {
+    background-color: #e8e8e8;
+}
+
+.qa-column-toggle-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 200;
+    min-width: 220px;
+    max-height: 320px;
+    overflow-y: auto;
+    margin-top: 0;
+    padding: 0;
+    background-color: #fff;
+    border: none;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.qa-column-toggle-dropdown--open {
+    display: block;
+}
+
+.qa-column-toggle-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #161616;
+    white-space: nowrap;
+    transition: background-color 0.1s ease;
+    border-bottom: 1px solid #e8e8e8;
+}
+
+.qa-column-toggle-item:last-child {
+    border-bottom: none;
+}
+
+.qa-column-toggle-item:hover {
+    background-color: #e8e8e8;
+}
+
+.qa-column-toggle-item input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
 }

@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "name": "Sample Assistant",
+    "description": "Full feature test for manifest runtime"
+  },
+  "msg": {
+    "welcome": "Hello! I'm the **Sample Assistant**.\nI'll analyze your site's page performance.",
+    "select_period": "Choose a time period to analyze.",
+    "analyzing": "Fetching data from {$date_from} to {$date_to}...",
+    "result_summary": "Analyzed **{$page_count|integer} pages**.\nTotal **{$total_pv|integer} PV**",
+    "select_page": "Select a page for details.",
+    "detail_title": "Details for **{$selected_title}**",
+    "detail_url": "URL: [{$selected_url}]({$selected_url})",
+    "no_data": "No data found for the selected period.\nPlease try a different period.",
+    "error": "An error occurred while fetching data.\nPlease wait and try again."
+  },
+  "btn": {
+    "7days": "Last 7 days",
+    "14days": "Last 14 days",
+    "30days": "Last 30 days",
+    "back": "Back to list",
+    "restart": "Start over"
+  },
+  "tbl": {
+    "pages": "Page List"
+  },
+  "col": {
+    "title": "Page Title",
+    "url": "URL",
+    "pv": "PV",
+    "avg_time": "Avg. Time"
+  }
+}

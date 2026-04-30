@@ -28,7 +28,8 @@ try {
 		require_once '../../../wp-settings.php';
 	}
 
-	$page_id = null;
+	$page_id                = null;
+	$page_url_for_live_view = '';
 	if ( $version_id ) {
 		global $qahm_db;
 		$table_name = 'view_page_version_hist';
@@ -36,6 +37,15 @@ try {
 		$result     = $qahm_db->get_results( $qahm_db->prepare( $query, $version_id ), ARRAY_A );
 		if ( $result && ! empty( $result[0]['page_id'] ) ) {
 			$page_id = (int) $result[0]['page_id'];
+			// 直前の view_page_version_hist クエリと同様に $qahm_db を使用する
+			// （class-qahm-view-heatmap.php:280-282 の qa_pages アクセスとも同じパターン）
+			$pages_table = $qahm_db->prefix . 'qa_pages';
+			$url_query   = 'SELECT url FROM ' . $pages_table . ' WHERE page_id = %d';
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Uses $qahm_db->prepare(); direct query required; caching not beneficial here.
+			$url_result = $qahm_db->get_results( $qahm_db->prepare( $url_query, $page_id ), ARRAY_A );
+			if ( $url_result && ! empty( $url_result[0]['url'] ) ) {
+				$page_url_for_live_view = $url_result[0]['url'];
+			}
 		}
 	}
 
@@ -300,6 +310,10 @@ try {
 
 	$html_bar              .= '<div class="heatmap-bar__controls-right">';
 	$html_bar              .= '<ul class="heatmap-bar__items">';
+	$live_view_title        = '<button id="heatmap-bar-live-view-button" class="heatmap-bar-button heatmap-bar-button--secondary">' . esc_html__( 'Live View URL', 'qa-heatmap-analytics' ) . '</button>';
+	$live_view_tooltip      = esc_attr__( 'Generate a URL to view heatmaps overlaid on the live site.', 'qa-heatmap-analytics' );
+	$live_view_icon         = '<i class="fas fa-external-link-alt"></i>';
+	$html_bar              .= $qahm_view_heatmap->get_html_bar_text( 'heatmap-bar-live-view', $live_view_icon . $live_view_title, $live_view_tooltip );
 	$version_update_title   = '<button id="heatmap-bar-version-update-button" class="heatmap-bar-button heatmap-bar-button--secondary">' . esc_html__( 'Create Heatmap Version', 'qa-heatmap-analytics' ) . '</button>';
 	$version_update_tooltip = esc_attr__( 'Changed this page’s content or layout? Create a new heatmap version.', 'qa-heatmap-analytics' );
 	$version_update_icon    = '<i class="fas fa-sync-alt"></i>';
@@ -397,6 +411,7 @@ try {
 				'hasShownNoDataAlert': false,
 				'pvterm_start_date':'<?php echo esc_js( $pvterm_start_date ); ?>',
 				'pvterm_latest_date':'<?php echo esc_js( $pvterm_latest_date ); ?>',
+				'page_url_for_live_view':'<?php echo esc_js( $page_url_for_live_view ); ?>',
 			};
 			qahm = Object.assign( qahm, qahmObj );
 
@@ -443,6 +458,83 @@ try {
 		<script src="./js/heatmap-view.js?ver=<?php echo esc_attr( $plugin_version ); ?>"></script>
 		<script src="./js/heatmap-bar.js?ver=<?php echo esc_attr( $plugin_version ); ?>"></script>
 		<script src="./js/heatmap-main.js?ver=<?php echo esc_attr( $plugin_version ); ?>"></script>
+		<script>
+		document.addEventListener('DOMContentLoaded', function(){
+			var liveViewBtn = document.getElementById('heatmap-bar-live-view-button');
+			if (!liveViewBtn) return;
+			liveViewBtn.addEventListener('click', function(){
+				var pageUrl = qahm.page_url_for_live_view;
+				if (!pageUrl) {
+					Swal.fire({title: '<?php echo esc_js( __( 'Failed', 'qa-heatmap-analytics' ) ); ?>', text: 'Page URL not found', icon: 'error'});
+					return;
+				}
+				var newWin = window.open('about:blank', '_blank');
+				var popupBlocked = !newWin;
+				var fd = new FormData();
+				fd.append('action', 'qahm_ajax_create_live_view_token');
+				fd.append('file_base_name', qahm.file_base_name);
+				fd.append('page_url', pageUrl);
+				fd.append('_ajax_nonce', <?php echo wp_json_encode( wp_create_nonce( 'qahm_ajax_create_live_view_token' ) ); ?>);
+				fetch(qahm.ajax_url, {method:'POST', body: fd})
+					.then(function(r){return r.json();})
+					.then(function(resp){
+						if (resp.success && resp.data && resp.data.live_view_url) {
+							var liveUrl = resp.data.live_view_url;
+							if (newWin) {
+								try {
+									var urlObj = new URL(liveUrl);
+									if (urlObj.protocol === 'https:' || urlObj.protocol === 'http:') {
+										newWin.location.href = liveUrl;
+									} else {
+										newWin.close();
+									}
+								} catch(e) {
+									newWin.close();
+								}
+							}
+							var safeUrl = liveUrl.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+							var dialogHtml = '<input type="text" id="qa-lv-url-input" value="' + safeUrl + '" style="width:100%;padding:8px;font-size:13px;box-sizing:border-box;" readonly onclick="this.select()">';
+							if (popupBlocked) {
+								dialogHtml += '<p style="margin-top:8px;font-size:12px;color:#c00;"><?php echo esc_js( __( 'Popup was blocked. Please open the URL manually.', 'qa-heatmap-analytics' ) ); ?></p>';
+							} else {
+								dialogHtml += '<p style="margin-top:8px;font-size:12px;color:#666;"><?php echo esc_js( __( 'Opened in new tab. This URL is valid for 5 minutes (one-time use).', 'qa-heatmap-analytics' ) ); ?></p>';
+							}
+							Swal.fire({
+								title: '<?php echo esc_js( __( 'Live View URL', 'qa-heatmap-analytics' ) ); ?>',
+								html: dialogHtml,
+								confirmButtonText: '<?php echo esc_js( __( 'Copy', 'qa-heatmap-analytics' ) ); ?>',
+								showCancelButton: true,
+								cancelButtonText: '<?php echo esc_js( __( 'Close', 'qa-heatmap-analytics' ) ); ?>'
+							}).then(function(result){
+								// SweetAlert2 v9.x は result.value を使う（isConfirmed は v10.0.0 以降）
+								// 既存の alert-message.js:50,86 と同じパターン
+								if (typeof result.value !== 'undefined' && result.value === true) {
+									var urlInput = document.getElementById('qa-lv-url-input');
+									if (urlInput) {
+										if (navigator.clipboard && navigator.clipboard.writeText) {
+											navigator.clipboard.writeText(urlInput.value);
+										} else {
+											urlInput.select();
+											document.execCommand('copy');
+										}
+									}
+								}
+							});
+						} else {
+							if (newWin) newWin.close();
+							var errorMessage = (resp && typeof resp.data === 'string' && resp.data) ?
+								resp.data :
+								'<?php echo esc_js( __( 'An error occurred while creating the Live View URL.', 'qa-heatmap-analytics' ) ); ?>';
+							Swal.fire({title: '<?php echo esc_js( __( 'Failed', 'qa-heatmap-analytics' ) ); ?>', text: errorMessage, icon: 'error'});
+						}
+					})
+					.catch(function(){
+						if (newWin) newWin.close();
+						Swal.fire({title: '<?php echo esc_js( __( 'Failed', 'qa-heatmap-analytics' ) ); ?>', text: 'Network error', icon: 'error'});
+					});
+			});
+		});
+		</script>
 		<?php // phpcs:enable WordPress.WP.EnqueuedResources.NonEnqueuedScript ?>
 		
 	</head>

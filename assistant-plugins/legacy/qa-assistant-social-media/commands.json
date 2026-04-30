@@ -1,0 +1,50 @@
+[
+	{
+	  "id": "cmd0",
+	  "commands": [
+		{
+		  "text": "commands.analyze_7",
+		  "action": {
+			"next": "m10",
+			"free": 7
+		  }
+		},
+		{
+		  "text": "commands.analyze_14",
+		  "action": {
+			"next": "m10",
+			"free": 14
+		  }
+		},
+		{
+		  "text": "commands.analyze_28",
+		  "action": {
+			"next": "m10",
+			"free": 28
+		  }
+		},
+		{
+		  "text": "commands.analyze_90",
+		  "action": {
+			"next": "m10",
+			"free": 90
+		  }
+		}
+	  ]
+	},
+	{
+	  "id": "cmd1",
+	  "commands": []
+	},
+	{
+	  "id": "end",
+	  "commands": [
+		{
+		  "text": "commands.return_start",
+		  "action": {
+			"next": "start"
+		  }
+		}
+	  ]
+	}
+  ]

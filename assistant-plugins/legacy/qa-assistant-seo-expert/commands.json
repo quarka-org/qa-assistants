@@ -1,0 +1,94 @@
+[
+  {
+    "id": "cmd0",
+    "commands": [
+      {
+        "text": "commands.View report",
+        "action": {
+          "next": "m1000"
+        }
+      },
+      {
+        "text": "commands.Find keyword suggestions",
+        "action": {
+          "next": "m2000"
+        }
+      }
+    ]
+  },
+    {
+    "id": "cmd1",
+    "commands": [
+            {
+        "text": "commands.Exit",
+        "action": {
+          "next": "say_see_you_soon"
+        }
+      }
+    ]
+  },
+  {
+    "id": "cmd1100",
+    "commands": [
+      {
+        "text": "commands.Analyze the last 7 days",
+        "action": {
+          "next": "m1100",
+          "free": 7
+        }
+      },
+      {
+        "text": "commands.Analyze the last 28 days",
+        "action": {
+          "next": "m1100",
+          "free": 28
+        }
+      }
+    ]
+  },
+  {
+    "id": "cmd2",
+    "commands": [
+      {
+        "text": "commands.Next",
+        "action": {
+          "next": "m1200"
+        }
+      }
+    ]
+  },
+  {
+    "id": "cmd3000",
+    "commands": [
+      {
+        "text": "commands.Find title rewrite suggestions",
+        "action": {
+          "next": "m3100"
+        }
+      }
+    ]
+  },
+  {
+    "id": "end_menu",
+    "commands": [
+      {
+        "text": "commands.View report",
+        "action": {
+          "next": "m1000"
+        }
+      },
+      {
+        "text": "commands.Find keyword suggestions",
+        "action": {
+          "next": "m2000"
+        }
+      },
+      {
+        "text": "commands.Exit",
+        "action": {
+          "next": "say_bye"
+        }
+      }
+    ]
+  }
+]

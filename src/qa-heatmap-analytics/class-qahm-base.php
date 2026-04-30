@@ -1244,4 +1244,27 @@ class QAHM_Base extends QAHM_WP_Base {
 		}
 		return false;
 	}
+
+	/**
+	 * #1105: 広告トラフィックで source_domain='direct' の場合、utm_source から表示用ドメインを解決する。
+	 * 保存データは変更せず、表示・集計時にのみ使用する。
+	 *
+	 * @param string $source_domain
+	 * @param string $utm_source
+	 * @param string $utm_medium
+	 * @return string 補完後の source_domain
+	 */
+	public static function resolve_ad_source_domain( $source_domain, $utm_source, $utm_medium ) {
+		if ( 'direct' !== $source_domain || empty( $utm_source ) || empty( $utm_medium ) ) {
+			return $source_domain;
+		}
+		if ( ! in_array( mb_strtolower( $utm_medium ), COMPENSABLE_MEDIA, true ) ) {
+			return $source_domain;
+		}
+		$source_lower = mb_strtolower( $utm_source );
+		if ( isset( UTM_SOURCE_TO_DOMAIN[ $source_lower ] ) ) {
+			return UTM_SOURCE_TO_DOMAIN[ $source_lower ];
+		}
+		return $source_domain;
+	}
 }
