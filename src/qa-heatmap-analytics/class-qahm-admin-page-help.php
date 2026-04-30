@@ -163,8 +163,8 @@ We also welcome your feedback or any insights you\'d like to share.',
 
 						<?php // --- プラグインと環境情報 --- ?>
 						<div class="qahm-help__section">
-							<h3 class="section-label"><?php esc_html_e( 'プラグインと環境情報', 'qa-heatmap-analytics' ); ?></h3>
-							<p class="qahm-help__version"><?php echo esc_html( QAHM_PLUGIN_NAME ); ?> <?php esc_html_e( 'バージョン', 'qa-heatmap-analytics' ); ?>: <?php echo esc_html( QAHM_PLUGIN_VERSION ); ?></p>
+							<h3 class="section-label"><?php esc_html_e( 'System Information', 'qa-heatmap-analytics' ); ?></h3>
+							<p class="qahm-help__version"><?php echo esc_html( QAHM_PLUGIN_NAME ); ?> <?php esc_html_e( 'Version', 'qa-heatmap-analytics' ); ?>: <?php echo esc_html( QAHM_PLUGIN_VERSION ); ?></p>
 							<table class="qahm-help__info-table">
 								<tr>
 									<th><?php esc_html_e( 'WordPress version', 'qa-heatmap-analytics' ); ?></th>
@@ -180,16 +180,16 @@ We also welcome your feedback or any insights you\'d like to share.',
 								</tr>
 								<?php if ( QAHM_TYPE === QAHM_TYPE_WP ) { ?>
 								<tr>
-									<th><?php esc_html_e( '今月のPV数 / 上限PV数', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Pageviews This Month / Limit:', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( number_format( $this_month_pv ) . ' / ' . number_format( $pv_limit ) ); ?></td>
 								</tr>
 								<?php } ?>
 								<tr>
-									<th><?php esc_html_e( 'データ保存期間', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Data Retention Period', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( $data_retention_days ) . ' ' . esc_html__( '日', 'qa-heatmap-analytics' ); ?></td>
 								</tr>
 								<tr>
-									<th><?php esc_html_e( '保存データ量', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Stored Data Size', 'qa-heatmap-analytics' ); ?></th>
 									<td>
 									<?php
 									if ( '--' !== $storage_size_mb ) {
@@ -201,11 +201,11 @@ We also welcome your feedback or any insights you\'d like to share.',
 									</td>
 								</tr>
 								<tr>
-									<th><?php esc_html_e( 'ファイル数', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Number of Files', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( $file_count ); ?></td>
 								</tr>
 								<tr>
-									<th><?php esc_html_e( 'QAのページ表示速度', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'QA Page Load Time', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( $avg_page_speed ); ?>
 									<?php
 									if ( '--' !== $avg_page_speed ) {

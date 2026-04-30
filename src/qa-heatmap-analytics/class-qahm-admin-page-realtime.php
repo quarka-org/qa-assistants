@@ -316,17 +316,6 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 				}
 			}
 
-			// #1105: 広告トラフィックの source_domain 補完（ファイル直読み経路）
-			// 注: 補完は utm_medium が COMPENSABLE_MEDIA に含まれる場合のみ発動するため、
-			// 後続の utm_medium フォールバック判定（empty チェック）には影響しない。
-			$rt_utm_source = isset( $body['utm_source'] ) ? $body['utm_source'] : '';
-			$rt_utm_medium = isset( $body['utm_medium'] ) ? $body['utm_medium'] : '';
-			$resolved_domain = QAHM_Base::resolve_ad_source_domain( $source_domain, $rt_utm_source, $rt_utm_medium );
-			if ( $resolved_domain !== $source_domain ) {
-				$source_domain      = mb_strimwidth( $resolved_domain, 0, $domain_width, $ellipsis );
-				$source_domain_html = esc_html( $source_domain );
-			}
-
 			$device     = $body['device_name'];
 			$device_map = array(
 				'dsk' => 'desktop',

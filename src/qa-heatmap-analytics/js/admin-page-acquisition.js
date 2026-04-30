@@ -32,7 +32,6 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
-		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -76,7 +75,6 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
-		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {

@@ -1423,23 +1423,6 @@ class QAHM_Db extends QAHM_File_Data {
 	}
 
 	/**
-	 * #1105: 広告トラフィックの source_domain 補完（表示時のみ。DB は変更しない）
-	 *
-	 * @param array $results_raw_ary 参照渡し
-	 */
-	private function compensate_ad_source_domains( &$results_raw_ary ) {
-		foreach ( $results_raw_ary as $idx => $line_ary ) {
-			if ( isset( $line_ary['source_domain'] ) && isset( $line_ary['utm_source'] ) ) {
-				$results_raw_ary[ $idx ]['source_domain'] = QAHM_Base::resolve_ad_source_domain(
-					$line_ary['source_domain'],
-					$line_ary['utm_source'],
-					isset( $line_ary['utm_medium'] ) ? $line_ary['utm_medium'] : ''
-				);
-			}
-		}
-	}
-
-	/**
 	 * @param null $query
 	 * @return array|bool|int
 	 */
@@ -1600,8 +1583,6 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ];
 			}
 		}
-		// #1105: 広告トラフィックの source_domain 補完
-		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		//返値をセット
 		if ( $is_error ) {
@@ -1767,7 +1748,7 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_medium'] = $mid_ary[ $mid ];
 			}
 			$cid = (int) $line_ary['utm_campaign'];
-			if ( ! isset( $cid_ary[ $cid ] ) ) {
+			if ( ! isset( $mid_ary[ $mid ] ) ) {
 				$query        = 'select utm_campaign from ' . $this->prefix . 'qa_utm_campaigns where campaign_id=%d';
 				$query        = $this->prepare( $query, $cid );
 				$utm_campaign = $this->get_results( $query );
@@ -1779,8 +1760,6 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ];
 			}
 		}
-		// #1105: 広告トラフィックの source_domain 補完
-		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		//返値をセット
 		if ( $is_error ) {
@@ -1942,7 +1921,7 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_medium'] = $mid_ary[ $mid ];
 			}
 			$cid = (int) $line_ary['utm_campaign'];
-			if ( ! isset( $cid_ary[ $cid ] ) ) {
+			if ( ! isset( $mid_ary[ $mid ] ) ) {
 				$query        = 'select utm_campaign from ' . $this->prefix . 'qa_utm_campaigns where campaign_id=%d';
 				$query        = $this->prepare( $query, $cid );
 				$utm_campaign = $this->get_results( $query );
@@ -1954,8 +1933,6 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ];
 			}
 		}
-		// #1105: 広告トラフィックの source_domain 補完
-		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		//返値をセット
 		if ( $is_error ) {
@@ -2623,8 +2600,6 @@ class QAHM_Db extends QAHM_File_Data {
 			$cid                                     = (int) $line_ary['utm_campaign'];
 			$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ] ?? '';
 		}
-		// #1105: 広告トラフィックの source_domain 補完
-		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		// 集計結果を results_raw_ary と同じ形式で返す
 		if ( ! empty( $group_by_keys ) ) {
@@ -2940,8 +2915,6 @@ class QAHM_Db extends QAHM_File_Data {
 			$cid                                     = (int) $line_ary['utm_campaign'];
 			$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ] ?? '';
 		}
-		// #1105: 広告トラフィックの source_domain 補完
-		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		// 集計結果を results_raw_ary と同じ形式で返す
 		if ( ! empty( $group_by_keys ) ) {
@@ -3105,8 +3078,6 @@ class QAHM_Db extends QAHM_File_Data {
 			$cid                                     = (int) $line_ary['utm_campaign'];
 			$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ] ?? '';
 		}
-		// #1105: 広告トラフィックの source_domain 補完
-		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		return $results_raw_ary;
 	}
