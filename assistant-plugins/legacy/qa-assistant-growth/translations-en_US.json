@@ -1,0 +1,23 @@
+{
+    "config": {
+        "name": "Growth Assistant",
+        "description": "Helps you spot landing pages that are quickly gaining traction.",
+		"author": "QuarkA"
+    },
+	"messages": {
+		"0": "Let’s see which pages are gaining traction. Select a comparison period to get started.",
+		"10": "We'll start by checking which landing pages have shown the most growth.",
+		"20": "Looking at the data now...",
+		"30": "This table shows landing pages that gained traction over the past {$check_days} days.\nPages with above-average pageviews in the past 7 days (over {$average_end_pv_count} PV) are highlighted and sorted by growth rate.",
+		"40": "Let’s take a look at where the traffic is coming from for the top {$top_x} growing pages.",
+		"50": "- For CPC or Display: Check for any ad changes during the past {$check_days} days.\n- For Organic: Look into keyword and ranking changes in Search Console.\n- For Social: Search for your company's content on X, Instagram, Facebook, etc., and see what may have contributed to the growth.",
+		"60": ""
+	},
+    "commands": {
+        "change_7": "This Week vs. Last Week",
+        "change_28": "Last 28 Days",
+        "change_90": "Last 90 Days",
+        "analyze_top": "Review Top Pages",
+        "return_start": "Back to Start"
+    }
+}
