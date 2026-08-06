@@ -63,7 +63,7 @@ class QAHM_View_Replay extends QAHM_View_Base {
 			return null;
 		}
 
-		$event_tsv = $wp_filesystem->get_contents( $path );
+		$event_tsv = $this->wrap_get_contents( $path );
 		$event_ary = $this->convert_tsv_to_array( $event_tsv );
 
 		// バージョンチェック

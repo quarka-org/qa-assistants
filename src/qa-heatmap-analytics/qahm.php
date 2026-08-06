@@ -5,7 +5,7 @@ Plugin URI: https://quarka.org/
 Description: Discover insights with QA Assistants — your platform for data-driven assistants that analyze sites from different angles.
 Author: QuarkA
 Author URI: https://quarka.org/
-Version: 5.2.0.0
+Version: 5.2.0.1
 Text Domain: qa-heatmap-analytics
 Requires at least: 5.9
 Tested up to: 6.9

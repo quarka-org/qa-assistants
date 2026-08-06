@@ -2572,7 +2572,7 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 											}
 										}
 										if ( $p_str !== '' ) {
-											$wp_filesystem->put_contents( $file_p_done, $p_str );
+											$this->wrap_put_contents( $file_p_done, $p_str );
 											$wp_filesystem->delete( $file_p );
 										}
 									}
@@ -2602,7 +2602,7 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 											}
 										}
 										if ( $e_str !== '' ) {
-											$wp_filesystem->put_contents( $file_e_done, $e_str );
+											$this->wrap_put_contents( $file_e_done, $e_str );
 											$wp_filesystem->delete( $file_e );
 										}
 									}
@@ -3190,7 +3190,7 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 								}
 								if ( ! empty( $c_str ) ) {
 									// update raw-c file
-									$wp_filesystem->put_contents( $file_c_done, $c_str );
+									$this->wrap_put_contents( $file_c_done, $c_str );
 									$wp_filesystem->delete( $file_c );
 								}
 							}
@@ -3953,7 +3953,7 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 									$p_str  = '';
 									$file_p = $raw_dir . $raw_name . '-p-done' . '.php';
 									if ( $wp_filesystem->exists( $file_p ) ) {
-										$p_str = $wp_filesystem->get_contents( $file_p );
+										$p_str = $this->wrap_get_contents( $file_p );
 									} elseif ( $before_yesterday ) {
 										foreach ( $raw_p_data_ary as $raw_p_data ) {
 											if ( (int) $newary[ $idx ]['pv_id'] !== (int) $raw_p_data['pv_id'] ) {
@@ -3977,7 +3977,7 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 									$c_str  = '';
 									$file_c = $raw_dir . $raw_name . '-c-done' . '.php';
 									if ( $wp_filesystem->exists( $file_c ) ) {
-										$c_str = $wp_filesystem->get_contents( $file_c );
+										$c_str = $this->wrap_get_contents( $file_c );
 									} elseif ( $before_yesterday ) {
 										foreach ( $raw_c_data_ary as $raw_c_data ) {
 											if ( (int) $newary[ $idx ]['pv_id'] !== (int) $raw_c_data['pv_id'] ) {
@@ -4001,7 +4001,7 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 									$e_str  = '';
 									$file_e = $raw_dir . $raw_name . '-e-done' . '.php';
 									if ( $wp_filesystem->exists( $file_e ) ) {
-										$e_str = $wp_filesystem->get_contents( $file_e );
+										$e_str = $this->wrap_get_contents( $file_e );
 									} elseif ( $before_yesterday ) {
 										foreach ( $raw_e_data_ary as $raw_e_data ) {
 											if ( (int) $newary[ $idx ]['pv_id'] !== (int) $raw_e_data['pv_id'] ) {
