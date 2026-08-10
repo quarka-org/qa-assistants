@@ -1,8 +1,0 @@
-{
-  "name": "config.name",
-  "description": "config.description",
-  "author": "config.author",
-  "images": {
-    "default": "character.png"
-  }
-}

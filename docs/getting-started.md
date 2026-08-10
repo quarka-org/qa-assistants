@@ -53,11 +53,10 @@ QA Assistants を WordPress に導入し、最初のアシスタントを動か�
 - 計測タグがサイトに設置されているか確認（**設定** > **計測対象サイト**）
 - 数日分のデータが蓄積されているか確認（**訪問レポート** に PV が出るかどうか）
 
-## 次にやること
+## 困ったとき
 
-- 自分用のアシスタントプラグインを作りたい → [docs/how-to-build.md](how-to-build.md)
-- 作ったプラグインを WordPress に配置する → [docs/how-to-deploy.md](how-to-deploy.md)
-- マニフェスト仕様を読む → [docs/specs/assistant-manifest.md](specs/assistant-manifest.md)
+- うまく動かない・改善してほしい点がある → [Issue を起票](https://github.com/quarka-org/qa-assistants/issues/new/choose)
+- 最新版の入手 → [Releases](https://github.com/quarka-org/qa-assistants/releases/latest)
 
 ## トラブルシューティング
 

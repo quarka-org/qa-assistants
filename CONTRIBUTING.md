@@ -26,17 +26,14 @@ QA Assistants へのフィードバックをご検討いただきありがとう
 | パス | 理由 |
 |---|---|
 | `src/qa-heatmap-analytics/` | QA Assistants 本体ソース。配布物として置かれており、内部の qa-platform リポジトリで管理されています |
-| `docs/specs/` | マニフェスト仕様書。qa-platform から同期されるため、ここで直接編集しても次回の同期で上書きされます |
 | `LICENSE` | GPLv2-or-later（WordPress プラグイン慣習）|
 
 これらに対する改善提案は **Issue でお願いします**。Issue を確認次第、内部リポジトリで対応を検討します。
 
 ---
 
-## アシスタントプラグイン作成についての質問
-
-`assistant-plugins/qa-assistant-starter/` と `docs/specs/` が用意されています。Claude Code を使うと、`CLAUDE.md` を自動で読み込んで作成支援してくれます。
+## インストール・使い方について
 
 - インストール手順: [docs/getting-started.md](docs/getting-started.md)
-- 作成手順: [docs/how-to-build.md](docs/how-to-build.md)
-- WordPress への配置: [docs/how-to-deploy.md](docs/how-to-deploy.md)
+
+それ以外のご質問も [Issue](https://github.com/quarka-org/qa-assistants/issues/new/choose) でお知らせください。
