@@ -18,12 +18,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'new_session_rate', label: qahml10n['table_new_session_rate'], width: 7, type: 'percentage' },
 		{ key: 'new_user', label: qahml10n['table_new_user'], width: 7, type: 'integer' },
 		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 7, type: 'percentage' },
-		{ key: 'page_session', label: qahml10n['table_page_session'], width: 7, type: 'float' },
+		{ key: 'page_session', label: qahml10n['table_page_session'], width: 7, type: 'float', agg: { type: 'wavg', weightKey: 'session' } }, // Issue #1175: ページ/セッションは合計でなく加重平均
 		{ key: 'avg_session_time', label: qahml10n['table_avg_session_time'], width: 7, type: 'duration' },
 		{ key: 'goal_conversion_rate', label: qahml10n['table_goal_conversion_rate'], width: 7, type: 'percentage' },
 		{ key: 'goal_completions', label: qahml10n['table_goal_completions'], width: 7, type: 'integer' },
 		{ key: 'goal_value', label: qahml10n['table_goal_value'], width: 7, type: 'integer' },
 		{ key: 'heatmap', label: qahml10n['table_heatmap'], width: 7, sortable: false, exportable: false, filtering: false, formatter: function(value, row) {
+			if ( row._isTotal ) return ''; // Issue #1445: 合計行は特定 URL を持たない＝ヒートマップを開けないため空白
 			return `<div class="qa-table-heatmap-container">
 					<span class="dashicons dashicons-desktop" data-device_name="dsk" data-page_id="${row.page_id}" data-is_landing_page="1"></span>
 					<span class="dashicons dashicons-tablet" data-device_name="tab" data-page_id="${row.page_id}" data-is_landing_page="1"></span>
@@ -37,6 +38,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -44,7 +46,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			direction: 'desc'
 		}
 	};
-	landingpageTable = qaTable.createTable('#tb_landingpage', landingpageHeader, landingpageOptions);
+	landingpageTable = qaTable.createTable('#tb_landingpage', landingpageHeader, { ...landingpageOptions, totalRow: { weightKey: 'session', label: qahml10n['table_total'] } }); // Issue #1175: 合計行（率・平均時間はセッション数で加重平均）
 
     let lpradios = document.getElementsByName( `js_lpGoals` );
     for ( let jjj = 0; jjj < lpradios.length; jjj++ ) {
@@ -122,7 +124,11 @@ jQuery(
 jQuery(document).on('qahm:dateRangeChanged', function( RangeStart, RangeEnd ) {
 	qahm.nowAjaxStep = 0;
 	qahm.renderBehaviorLpData(reportDateBetween);
-
+	// [Issue #67] テーブルは All Goals (gid=0) で再描画されるため、UI のラジオも同期させる
+	let allGoalsRadio = document.getElementById( 'js_lpGoals_0' );
+	if ( allGoalsRadio ) {
+		allGoalsRadio.checked = true;
+	}
 });
 
 qahm.renderBehaviorLpData = function(dateBetweenStr) {

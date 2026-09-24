@@ -386,32 +386,35 @@ qahm.createFilterBlock = function() {
 // Differs between ZERO and QA - End ----------
 
 
-qahm.processSeparateData = function( separateData ) {
-	//let outputArray = [];
-	//let totalExitNumSum = 0; // 合計を保存する変数を初期化
+// #1512: キー成分は PHP 側で rawurlencode されて「_」連結される。decode に失敗する値（旧形式キー等）は生値のまま返す。
+qahm.safeDecodeComponent = function( str ) {
+	try {
+		return decodeURIComponent( str );
+	} catch ( e ) {
+		return str;
+	}
+};
 
-	// 合計行を追加
-	//let totalCheckbox = '<input type="checkbox" data-col-id="0" data-row-id="0">';
-	//outputArray.push([totalCheckbox, '', '合計', '---', '---', totalExitNumSum]);
+qahm.processSeparateData = function( separateData ) {
 	// 各参照元メディアごとにループ
 	for (let key in separateData.merge_as) {
-		let [media, source, campaign, is_goal] = key.split('_');
-		//let totalExitNum = 0;
-
 		if (!key.includes('_')) {
 			continue;
 		}
 
-		//for (let subKey in separateData.merge_as[key]) {
-		//	totalExitNum += separateData.merge_as[key][subKey][3]; // 3 is the index of EXIT_NUM in the array
-		//}
-		//totalExitNumSum += totalExitNum; // 合計を更新
+		// #1512: 実在するキーをそのまま保持する（旧実装は split 断片からキーを再構築しており、
+		// 成分に「_」を含むキーでは実在しないキーが積まれ、後段の merge 参照が空振りしていた）
+		qahm.filterKeyAry.push( key );
 
-		// チェックボックスを追加
-		//let checkbox = '<input type="checkbox" data-col-id="0" data-row-id="' + outputArray.length + '">';
-		//outputArray.push([checkbox, media + '_' + source + '_' + is_goal, media, source, is_goal, totalExitNum]);
+		let keySplit = key.split('_');
+		if ( keySplit.length !== 4 ) {
+			// 分解不能な旧形式キーはフィルタ候補に混ぜない（filterKeyAry には保持するが、フィルタ適用時は convertFilterKeyAry でも除外される）
+			continue;
+		}
+		let media    = qahm.safeDecodeComponent( keySplit[0] );
+		let source   = qahm.safeDecodeComponent( keySplit[1] );
+		let campaign = qahm.safeDecodeComponent( keySplit[2] );
 
-		qahm.filterKeyAry.push( media + '_' + source + '_' + campaign + '_' + is_goal );
 		if ( ! qahm.filterSourceAry.includes( source ) ) {
 			qahm.filterSourceAry.push( source );
 		}
@@ -424,9 +427,6 @@ qahm.processSeparateData = function( separateData ) {
 	}
 	qahm.filterGoalAry.push( qahml10n['goal_achieved'] );
 	qahm.filterGoalAry.push( qahml10n['goal_not_achieved'] );
-
-	//outputArray[0][5] = totalExitNumSum; // 合計を更新
-	//return outputArray;
 }
 
 qahm.convertUrlParamToAry = function( sourceParam, mediaParam, campaignParam, goalParam ) {
@@ -463,10 +463,14 @@ qahm.convertFilterKeyAry = function() {
 	for ( let keyIdx = 0; keyIdx < qahm.filterKeyAry.length; keyIdx++ ) {
 		const key = qahm.filterKeyAry[keyIdx];
 		const keySplit = key.split('_');
-		const source   = keySplit[1];
-		const media    = keySplit[0];
-		const campaign = keySplit[2];
-		const goal     = keySplit[3];
+		if ( keySplit.length !== 4 ) {
+			// #1512: 分解不能な旧形式キーはフィルタ選択時のマッチ対象外
+			continue;
+		}
+		const source   = qahm.safeDecodeComponent( keySplit[1] );
+		const media    = qahm.safeDecodeComponent( keySplit[0] );
+		const campaign = qahm.safeDecodeComponent( keySplit[2] );
+		const goal     = qahm.safeDecodeComponent( keySplit[3] );
 
 		// 参照元のチェック
 		if ( qahm.urlSourceAry.length > 0 && ! qahm.urlSourceAry.includes( source ) ) {

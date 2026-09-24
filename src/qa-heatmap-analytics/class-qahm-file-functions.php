@@ -79,7 +79,7 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 *             'device_id' => (int) デバイスID (1:desktop, 2:tablet, 3:mobile),
 	 *             'source_id' => (int) ソースID,
 	 *             'utm_source' => (string) UTMソース,
-	 *             'source_domain' => (string) ソースドメイン,
+	 *             'source_domain' => (string) 参照元（ドメイン文字列）,
 	 *             'medium_id' => (int) メディアID,
 	 *             'utm_medium' => (string) UTMメディア,
 	 *             'campaign_id' => (int) キャンペーンID,
@@ -99,9 +99,9 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 *     ]
 	 */
 	public function get_view_pv( $tracking_id, $start_datetime, $end_datetime, $options = array() ) {
-		// PV範囲を特定
-		$start_time = strtotime( $start_datetime );
-		$end_time   = strtotime( $end_datetime );
+		// PV範囲を特定（#1153: 受け取り日時はサイト時計で unixtime 化。生 strtotime の暗黙 UTC を排す）
+		$start_time = $this->site_str_to_unixtime( $tracking_id, $start_datetime );
+		$end_time   = $this->site_str_to_unixtime( $tracking_id, $end_datetime );
 
 		if ( ! $start_time || ! $end_time ) {
 			return array();
@@ -132,9 +132,9 @@ class QAHM_File_Functions extends QAHM_File_Base {
 					continue;
 				}
 
-				// access_timeが文字列の場合はstrtimeで変換
+				// access_timeが文字列の場合はサイト時計でunixtime化（#1153: 生 strtotime の暗黙 UTC を排す）
 				if ( is_string( $pv_data['access_time'] ) ) {
-					$pv_time = strtotime( $pv_data['access_time'] );
+					$pv_time = $this->site_str_to_unixtime( $tracking_id, $pv_data['access_time'] );
 				} else {
 					$pv_time = (int) $pv_data['access_time'];
 				}
@@ -146,6 +146,228 @@ class QAHM_File_Functions extends QAHM_File_Base {
 		}
 
 		return $results;
+	}
+
+	/**
+	 * 指定 tid・指定1日分の「view_pv 相当の行配列」を allpv 列DB から組み立てる（view_pv 廃止 RM4 共有ビルダー #1402）。
+	 *
+	 * get_view_pv の allpv 版シブリング。get_view_pv（view_pv 行ファイル読み）を廃止していくため、各リーダーが
+	 * 「tid＋日付の view_pv 相当行」を allpv から得るための共有プリミティブ。1日単位（R2/R5/R1 は日付ごとに読む）。
+	 * allpv ネイティブ列を読み、文字列列は resolve_master_columns（RM3-A public ファサード）で、計測時メタ
+	 * （session_no/is_raw_p/c/e）は get_pv_log（qa_pv_log）で補完する。RM3-B の CSV 版ロジックの per-day 一般化。
+	 *
+	 * access_time は view_pv 同様 unixtime のまま返す（整形は消費者側）。title は view_pv 生成（cron-proc）同様 esc_html。
+	 * os→UAos・browser→UAbrowser に rename（view_pv 行のキー名に合わせる）。content_id/utm_content も付与する
+	 * （allpv ネイティブ＝view_pv には無かったが害はない superset）。
+	 * session_id（allpv ネイティブ・日別採番）も付与する（RM4-R1 PR-0 #1406 の superset。R1 のセッション復元は
+	 * physical adjacency 遡りでなく session_id グループで行う。session_id は日を跨がず、view_pv 日ファイル境界＝
+	 * qa_pv_log access_time の暦日バケットと同一境界で切れることを dev5 検証で確定済み
+	 * 〔tasks/issue-1406-rm4-r1-pr0/daycross-verification.md〕＝前日ロード・跨ぎ結合は不要）。
+	 * ⚠ is_reject（reader 属性・MASTER_RESOLVER_MAP 外）は含めない＝必要な消費者が出たら拡張する。
+	 *
+	 * @param string     $tracking_id  トラッキングID.
+	 * @param string     $ymd          対象日（'Ymd' 8桁）.
+	 * @param array|null $pv_id_filter 指定時は該当 pv_id の行のみ組み立てる（#1406: find_allpv_pv_ids_for_date の
+	 *                                 matched 集合を渡し、resolver/get_pv_log を matched 行に限定する軽量化用）。
+	 *                                 null＝全行（従来挙動）。非配列は null 返し。空配列は空配列返し.
+	 * @return array|null 行配列（assoc）。allpv 未 done／列不整合／get_pv_log カバレッジ不足なら null（呼び出し側フォールバック）。done で0件（filter 全不一致含む）は空配列.
+	 */
+	public function build_allpv_rows_for_date( $tracking_id, $ymd, $pv_id_filter = null ) {
+		global $qahm_db, $qahm_qal_material;
+		if ( ! is_object( $qahm_db ) || ! is_object( $qahm_qal_material ) ) {
+			return null;
+		}
+		$ymd = (string) $ymd;
+		if ( 8 !== strlen( $ymd ) ) {
+			return null;
+		}
+
+		$columns = array(
+			'pv_id',
+			'session_id',
+			'reader_id',
+			'page_id',
+			'device_id',
+			'source_id',
+			'medium_id',
+			'campaign_id',
+			'content_id',
+			'access_time',
+			'pv',
+			'speed_msec',
+			'browse_sec',
+			'is_last',
+			'is_newuser',
+			'version_id',
+		);
+
+		$cols = $qahm_db->load_allpv_columns( $tracking_id, $ymd, $columns );
+		if ( null === $cols ) {
+			// Issue #1420: データ無し日（manifest done rows=0）は「done で行0件」＝空配列（契約どおり）。
+			// null＝真の未 done（呼び出し側フォールバック）と区別する。フラグ OFF は常に false＝従来どおり null。
+			if ( $qahm_db->is_allpv_nodata_day( $tracking_id, $ymd ) ) {
+				return array();
+			}
+			return null;
+		}
+		$pv_ids = isset( $cols['pv_id'] ) ? $cols['pv_id'] : array();
+		$count  = $this->wrap_count( $pv_ids );
+
+		$rows = array();
+		for ( $i = 0; $i < $count; $i++ ) {
+			$rows[] = array(
+				'pv_id'       => (int) $pv_ids[ $i ],
+				'session_id'  => isset( $cols['session_id'][ $i ] ) ? (int) $cols['session_id'][ $i ] : 0,
+				'reader_id'   => isset( $cols['reader_id'][ $i ] ) ? (int) $cols['reader_id'][ $i ] : 0,
+				'page_id'     => isset( $cols['page_id'][ $i ] ) ? (int) $cols['page_id'][ $i ] : 0,
+				'device_id'   => isset( $cols['device_id'][ $i ] ) ? (int) $cols['device_id'][ $i ] : 0,
+				'source_id'   => isset( $cols['source_id'][ $i ] ) ? (int) $cols['source_id'][ $i ] : 0,
+				'medium_id'   => isset( $cols['medium_id'][ $i ] ) ? (int) $cols['medium_id'][ $i ] : 0,
+				'campaign_id' => isset( $cols['campaign_id'][ $i ] ) ? (int) $cols['campaign_id'][ $i ] : 0,
+				'content_id'  => isset( $cols['content_id'][ $i ] ) ? (int) $cols['content_id'][ $i ] : 0,
+				'access_time' => isset( $cols['access_time'][ $i ] ) ? (int) $cols['access_time'][ $i ] : 0,
+				'pv'          => isset( $cols['pv'][ $i ] ) ? (int) $cols['pv'][ $i ] : 0,
+				'speed_msec'  => isset( $cols['speed_msec'][ $i ] ) ? (int) $cols['speed_msec'][ $i ] : 0,
+				'browse_sec'  => isset( $cols['browse_sec'][ $i ] ) ? (int) $cols['browse_sec'][ $i ] : 0,
+				'is_last'     => isset( $cols['is_last'][ $i ] ) ? (int) $cols['is_last'][ $i ] : 0,
+				'is_newuser'  => isset( $cols['is_newuser'][ $i ] ) ? (int) $cols['is_newuser'][ $i ] : 0,
+				'version_id'  => isset( $cols['version_id'][ $i ] ) ? (int) $cols['version_id'][ $i ] : 0,
+			);
+		}
+
+		// #1406: pv_id filter 指定時は該当行のみ残す（以降の resolver / get_pv_log を matched 行に限定）。
+		if ( null !== $pv_id_filter ) {
+			if ( ! is_array( $pv_id_filter ) ) {
+				return null;
+			}
+			$filter_map = array();
+			foreach ( $pv_id_filter as $fid ) {
+				$filter_map[ (int) $fid ] = true;
+			}
+			$filtered = array();
+			foreach ( $rows as $r ) {
+				if ( isset( $filter_map[ $r['pv_id'] ] ) ) {
+					$filtered[] = $r;
+				}
+			}
+			$rows = $filtered;
+		}
+
+		if ( empty( $rows ) ) {
+			return array();
+		}
+
+		$material_columns = array(
+			'url',
+			'title',
+			'utm_source',
+			'source_domain',
+			'utm_medium',
+			'utm_campaign',
+			'utm_content',
+			'os',
+			'browser',
+			'language',
+			'country_code',
+		);
+		$rows = $qahm_qal_material->resolve_master_columns( $rows, $material_columns, $tracking_id );
+
+		$pv_id_list = array();
+		foreach ( $rows as $r ) {
+			$pid = (int) $r['pv_id'];
+			if ( $pid > 0 ) {
+				$pv_id_list[] = $pid;
+			}
+		}
+		$pvlog_map = QAHM_DB_Functions::get_pv_log( $pv_id_list );
+		if ( ! is_array( $pvlog_map ) ) {
+			return null;
+		}
+		foreach ( $pv_id_list as $pid ) {
+			if ( ! isset( $pvlog_map[ $pid ] ) ) {
+				return null;
+			}
+		}
+
+		foreach ( $rows as &$row ) {
+			$row['UAos']      = isset( $row['os'] ) ? $row['os'] : '';
+			$row['UAbrowser'] = isset( $row['browser'] ) ? $row['browser'] : '';
+			if ( isset( $row['title'] ) && '' !== (string) $row['title'] ) {
+				$row['title'] = esc_html( $row['title'] );
+			}
+			$pid               = (int) $row['pv_id'];
+			$log               = isset( $pvlog_map[ $pid ] ) ? $pvlog_map[ $pid ] : array();
+			$row['session_no'] = isset( $log['session_no'] ) ? $log['session_no'] : '';
+			$row['is_raw_p']   = isset( $log['is_raw_p'] ) ? $log['is_raw_p'] : '';
+			$row['is_raw_c']   = isset( $log['is_raw_c'] ) ? $log['is_raw_c'] : '';
+			$row['is_raw_e']   = isset( $log['is_raw_e'] ) ? $log['is_raw_e'] : '';
+		}
+		unset( $row );
+
+		return $rows;
+	}
+
+	/**
+	 * 指定 tid・指定1日分の allpv から、filter 列の値が一致する pv_id 集合を返す（view_pv 廃止 RM4-R1 PR-0 #1406）。
+	 *
+	 * R1（get_results_view_pv / get_vr_view_session）の index 駆動経路（page_id / version_id where）が使っていた
+	 * view_pv index ファイルを、allpv の軽量列スキャンで吸収するためのプリミティブ。pv_id＋filter 列の2列だけを
+	 * 読んで PHP で突合し、full 行の構築（resolver / get_pv_log）は matched 行のみ
+	 * build_allpv_rows_for_date( $tid, $ymd, $matched ) に委ねる想定（着手前設計相談 🟡-3 (a)：列スキャン先行・
+	 * 新 index は perf 計測で必要になってから＝YAGNI）。
+	 *
+	 * @param string $tracking_id   トラッキングID.
+	 * @param string $ymd           対象日（'Ymd' 8桁）.
+	 * @param string $filter_column 突合する列名。'page_id'／'version_id' のみ許可（whitelist）.
+	 * @param array  $match_ids     一致させる値（int）の配列.
+	 * @return array|null matched pv_id（int）の配列（allpv 行順）。allpv 未 done／列不整合なら null（呼び出し側
+	 *                    フォールバック）。done で一致 0 件・match_ids 空は空配列.
+	 */
+	public function find_allpv_pv_ids_for_date( $tracking_id, $ymd, $filter_column, $match_ids ) {
+		global $qahm_db;
+		if ( ! is_object( $qahm_db ) ) {
+			return null;
+		}
+		$ymd = (string) $ymd;
+		if ( 8 !== strlen( $ymd ) ) {
+			return null;
+		}
+		$allowed = array( 'page_id', 'version_id' );
+		if ( ! in_array( $filter_column, $allowed, true ) ) {
+			return null;
+		}
+		if ( ! is_array( $match_ids ) ) {
+			return null;
+		}
+		if ( empty( $match_ids ) ) {
+			return array();
+		}
+
+		$match_map = array();
+		foreach ( $match_ids as $mid ) {
+			$match_map[ (int) $mid ] = true;
+		}
+
+		$cols = $qahm_db->load_allpv_columns( $tracking_id, $ymd, array( 'pv_id', $filter_column ) );
+		if ( null === $cols ) {
+			// Issue #1420: データ無し日（manifest done rows=0）＝「done で一致0件」＝空配列（契約どおり）。
+			if ( $qahm_db->is_allpv_nodata_day( $tracking_id, $ymd ) ) {
+				return array();
+			}
+			return null;
+		}
+		$pv_ids = isset( $cols['pv_id'] ) ? $cols['pv_id'] : array();
+		$vals   = isset( $cols[ $filter_column ] ) ? $cols[ $filter_column ] : array();
+		$count  = $this->wrap_count( $pv_ids );
+
+		$matched = array();
+		for ( $i = 0; $i < $count; $i++ ) {
+			if ( isset( $vals[ $i ] ) && isset( $match_map[ (int) $vals[ $i ] ] ) ) {
+				$matched[] = (int) $pv_ids[ $i ];
+			}
+		}
+
+		return $matched;
 	}
 
 	/**
@@ -174,14 +396,14 @@ class QAHM_File_Functions extends QAHM_File_Base {
 			return array();
 		}
 
-		// 日付範囲でフィルタリング
-		$start_time = strtotime( $start_date );
-		$end_time   = strtotime( $end_date );
+		// 日付範囲でフィルタリング（#1153: 受け取り日付はサイト時計で unixtime 化）
+		$start_time = $this->site_str_to_unixtime( $tracking_id, $start_date );
+		$end_time   = $this->site_str_to_unixtime( $tracking_id, $end_date );
 
 		$filtered_data = array();
 		foreach ( $data as $index => $day_data ) {
 			if ( is_array( $day_data ) && isset( $day_data['date'] ) ) {
-				$day_time = strtotime( $day_data['date'] );
+				$day_time = $this->site_str_to_unixtime( $tracking_id, $day_data['date'] );
 				if ( $day_time >= $start_time && $day_time <= $end_time ) {
 					$filtered_data[] = $day_data;
 				}
@@ -192,6 +414,30 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	}
 
 	/**
+	 * 受け取った日付/日時文字列を、計測サイトの時計（get_site_clock）で解釈して unixtime に変換する。
+	 * #1153 窓口一本化: 生 strtotime（暗黙 UTC）を排し、文字列⇄unixtime の変換は必ずサイト時計を通す。
+	 * 'Y-m-d'（時刻なし）と 'Y-m-d H:i:s' の双方を受け付ける。
+	 *
+	 * 時刻なし入力には ' 00:00:00' を補い、常に 'Y-m-d H:i:s' で解釈する。これは本コードベースの
+	 * 主流の流儀（呼び出し側で明示的に時刻を付与してから str_to_unixtime を呼ぶ）に揃えたもの。
+	 * createFromFormat は時刻フィールドが未指定だと「実行時の現在時刻」で補完してしまい、同一入力でも
+	 * 実行時刻で結果が揺れる（=最終日の取りこぼし等）。フォーマットを長さで選ぶだけでは補完は防げないため、
+	 * 全フィールドを明示することで確実に深夜起点に固定する。trim は末尾空白による長さ誤判定も防ぐ。
+	 *
+	 * @param string $tracking_id  計測サイト識別子
+	 * @param string $datetime_str 日付または日時の文字列
+	 * @return int|false unixtime（UTC秒）。解釈不能なら false（呼び出し側の falsy 判定が効く）。
+	 */
+	private function site_str_to_unixtime( $tracking_id, $datetime_str ) {
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
+		$norm  = trim( str_replace( 'T', ' ', (string) $datetime_str ) );
+		if ( strlen( $norm ) <= 10 ) {
+			$norm .= ' 00:00:00';
+		}
+		return $clock->str_to_unixtime( $norm, 'Y-m-d H:i:s' );
+	}
+
+	/**
 	 * 指定日付の最小PV IDを取得
 	 *
 	 * @param string $tracking_id トラッキングID
@@ -199,11 +445,13 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 * @return int|null 最小PV ID
 	 */
 	private function get_min_pv_id_for_date( $tracking_id, $timestamp ) {
+		// #1153: ファイル名の日付はサイト時計（書き側 WP-TZ バケット）に合わせる。
+		$clock      = QAHM_Time::get_site_clock( $tracking_id );
 		$data_dir   = $this->get_data_dir_path();
 		$view_dir   = $data_dir . 'view/';
 		$viewpv_dir = $view_dir . $tracking_id . '/view_pv/';
 
-		$target_date = gmdate( 'Y-m-d', $timestamp );
+		$target_date = $clock->unixtime_to_str( $timestamp, 'Y-m-d' );
 		$files       = $this->wrap_dirlist( $viewpv_dir );
 
 		$min_pv_id = null;
@@ -231,11 +479,13 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 * @return int|null 最大PV ID
 	 */
 	private function get_max_pv_id_for_date( $tracking_id, $timestamp ) {
+		// #1153: ファイル名の日付はサイト時計（書き側 WP-TZ バケット）に合わせる。
+		$clock      = QAHM_Time::get_site_clock( $tracking_id );
 		$data_dir   = $this->get_data_dir_path();
 		$view_dir   = $data_dir . 'view/';
 		$viewpv_dir = $view_dir . $tracking_id . '/view_pv/';
 
-		$target_date = gmdate( 'Y-m-d', $timestamp );
+		$target_date = $clock->unixtime_to_str( $timestamp, 'Y-m-d' );
 		$files       = $this->wrap_dirlist( $viewpv_dir );
 
 		$max_pv_id = null;
@@ -672,7 +922,9 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 *
 	 * @param string $tracking_id トラッキングID
 	 * @param string $start_date 開始日 (Y-m-d)
-	 * @param string $end_date 終了日 (Y-m-d)
+	 * @param string $end_date 終了日 (Y-m-d)。ISO 8601（Y-m-d\TH:i:s）も可＝先頭10文字だけを使う。
+	 *                         #1598: 桁を詰めない形式（Y-n-j や Ymd）は想定外（先頭7文字を月の起点にするため
+	 *                         Ymd だと別の月を読む）。呼び出し側は必ずゼロ埋めの Y-m-d で渡すこと。
 	 * @param int $goal_id ゴールID
 	 * @return array セッションの配列。以下の構造を持つ：
 	 *     [
@@ -692,7 +944,7 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 *                 'version_id' => (int) バージョンID,
 	 *                 'source_id' => (int) ソースID,
 	 *                 'utm_source' => (string) UTMソース,
-	 *                 'source_domain' => (string) 参照元ドメイン,
+	 *                 'source_domain' => (string) 参照元（ドメイン文字列）,
 	 *                 'medium_id' => (int) メディアID,
 	 *                 'utm_medium' => (string) UTMメディア,
 	 *                 'campaign_id' => (int) キャンペーンID,
@@ -714,8 +966,20 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 *     ]
 	 */
 	public function get_goal( $tracking_id, $start_date, $end_date, $goal_id ) {
+		// #1153: access_time→日付キーはサイト時計（書き側 WP-TZ バケット）に合わせる。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
+
+		// #1598: 期間は 'Y-m-d' でも ISO 8601（例 2026-07-23T00:00:00）でも渡されうる。
+		// 下の比較相手 $pv_date は必ず 'Y-m-d' なので、日付だけの形に揃えてから使う。
+		// 揃えないと '2026-07-23' >= '2026-07-23T00:00:00' が偽になり、開始日の達成が丸ごと落ちる。
+		$start_date = $this->wrap_substr( $start_date, 0, 10 );
+		$end_date   = $this->wrap_substr( $end_date, 0, 10 );
+
 		// 月ごとにファイルを取得
-		$current_date = new DateTime( $start_date );
+		// #1598: 月ファイルは月初日付で作られる。開始日そのものから modify('+1 month') すると
+		// 日が保たれるため、終了日の日が開始日の日より小さい月跨ぎで最後の月を読み落とす
+		// （例 7/23 → 8/23 となり 8/21 を越えるので 8月分が丸ごと欠落）。月初へ丸めてから回す。
+		$current_date = new DateTime( $this->wrap_substr( $start_date, 0, 7 ) . '-01' );
 		$end_date_obj = new DateTime( $end_date );
 
 		$results = array();
@@ -730,7 +994,7 @@ class QAHM_File_Functions extends QAHM_File_Base {
 				foreach ( $file_data as $session_data ) {
 					foreach ( $session_data as $pv_data ) {
 						$pv_time = $pv_data['access_time'];
-						$pv_date = gmdate( 'Y-m-d', $pv_time );
+						$pv_date = $clock->unixtime_to_str( $pv_time, 'Y-m-d' );
 
 						if ( $pv_date >= $start_date && $pv_date <= $end_date ) {
 							$results[] = $session_data;
@@ -1410,27 +1674,6 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	}
 
 	/**
-	 * 日付範囲を配列として取得
-	 *
-	 * @param string $start_date 開始日 (Y-m-d)
-	 * @param string $end_date 終了日 (Y-m-d)
-	 * @return array 日付の配列
-	 */
-	private function get_date_range( $start_date, $end_date ) {
-		$dates = array();
-
-		$current = strtotime( $start_date );
-		$end     = strtotime( $end_date );
-
-		while ( $current <= $end ) {
-			$dates[] = gmdate( 'Y-m-d', $current );
-			$current = strtotime( '+1 day', $current );
-		}
-
-		return $dates;
-	}
-
-	/**
 	 * ページのクリックデータを取得する
 	 *
 	 * @param string $tracking_id トラッキングID
@@ -1569,12 +1812,14 @@ class QAHM_File_Functions extends QAHM_File_Base {
 		$last_date        = null;
 		$raw_c_cached_ary = array();
 
+		// #1153: access_time→日付キーはサイト時計（書き側 WP-TZ バケット）に合わせる。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		foreach ( $filtered_pv_data as $pv_log ) {
 			$raw_c_tsv        = null;
 			$access_timestamp = isset( $pv_log['access_time'] ) ? $pv_log['access_time'] : 0;
 
 			// 日付を取得
-			$current_date = gmdate( 'Y-m-d', $access_timestamp );
+			$current_date = $clock->unixtime_to_str( $access_timestamp, 'Y-m-d' );
 
 			// 日付が変わったらファイルを再度読み込む
 			if ( $last_date !== $current_date ) {
@@ -1761,12 +2006,14 @@ class QAHM_File_Functions extends QAHM_File_Base {
 		$last_date        = null;
 		$raw_p_cached_ary = array();
 
+		// #1153: access_time→日付キーはサイト時計（書き側 WP-TZ バケット）に合わせる。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		foreach ( $filtered_pv_data as $pv_log ) {
 			$raw_p_tsv        = null;
 			$access_timestamp = isset( $pv_log['access_time'] ) ? $pv_log['access_time'] : 0;
 
 			// 日付を取得
-			$current_date = gmdate( 'Y-m-d', $access_timestamp );
+			$current_date = $clock->unixtime_to_str( $access_timestamp, 'Y-m-d' );
 
 			// 日付が変わったらファイルを再度読み込む
 			if ( $last_date !== $current_date ) {
@@ -2222,8 +2469,10 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 * 目標データを目標番号と期間で取得（改良版）
 	 * @param string $tracking_id トラッキングID
 	 * @param int $goal_number 目標番号
-	 * @param string $start_date 開始日 (Y-m-d)
-	 * @param string $end_date 終了日 (Y-m-d)
+	 * @param string $start_date 開始日 (Y-m-d)。ISO 8601（Y-m-d\TH:i:s）も可＝先頭10文字だけを使う。
+	 *                           #1598: 桁を詰めない形式（Y-n-j や Ymd）は想定外（先頭7文字を月の起点にするため
+	 *                           Ymd だと別の月を読む）。呼び出し側は必ずゼロ埋めの Y-m-d で渡すこと。
+	 * @param string $end_date 終了日 (Y-m-d)。同上。
 	 * @return array ゴール達成セッションデータ。既存のget_goal()と同じ構造：
 	 *     [
 	 *         [  // セッション1
@@ -2248,9 +2497,21 @@ class QAHM_File_Functions extends QAHM_File_Base {
 	 *     ]
 	 */
 	public function get_goal_data_by_number( $tracking_id, $goal_number, $start_date, $end_date ) {
-		$start_date_obj = new DateTime( $start_date );
-		$end_date_obj   = new DateTime( $end_date );
-		$current_date   = clone $start_date_obj;
+		// #1153: access_time→日付キーはサイト時計（書き側 WP-TZ バケット）に合わせる。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
+
+		// #1598: 期間は 'Y-m-d' でも ISO 8601（例 2026-07-23T00:00:00）でも渡されうる。
+		// 下の比較相手 $pv_date は必ず 'Y-m-d' なので、日付だけの形に揃えてから使う。
+		// 揃えないと '2026-07-23' >= '2026-07-23T00:00:00' が偽になり、開始日の達成が丸ごと落ちる。
+		$start_date = $this->wrap_substr( $start_date, 0, 10 );
+		$end_date   = $this->wrap_substr( $end_date, 0, 10 );
+
+		$end_date_obj = new DateTime( $end_date );
+
+		// #1598: 月ファイルは月初日付で作られる。開始日そのものから modify('+1 month') すると
+		// 日が保たれるため、終了日の日が開始日の日より小さい月跨ぎで最後の月を読み落とす
+		// （例 7/23 → 8/23 となり 8/21 を越えるので 8月分が丸ごと欠落）。月初へ丸めてから回す。
+		$current_date = new DateTime( $this->wrap_substr( $start_date, 0, 7 ) . '-01' );
 
 		$results = array();
 
@@ -2264,7 +2525,7 @@ class QAHM_File_Functions extends QAHM_File_Base {
 					$session_in_range = false;
 					foreach ( $session_data as $pv_data ) {
 						$pv_time = $pv_data['access_time'];
-						$pv_date = gmdate( 'Y-m-d', $pv_time );
+						$pv_date = $clock->unixtime_to_str( $pv_time, 'Y-m-d' );
 
 						if ( $pv_date >= $start_date && $pv_date <= $end_date ) {
 							$session_in_range = true;

@@ -6,7 +6,7 @@
  * Provides AJAX endpoints for manifest retrieval, QAL data fetching,
  * and config read/write operations.
  *
- * Design spec: docs/specs/assistant-manifest.md
+ * Design spec: docs/specs/assistant/overview.md (and related)
  *
  * @package qa_heatmap_analytics
  */
@@ -66,12 +66,59 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			return;
 		}
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- WP_Filesystem may use FTP mode.
-		$manifest_json = file_get_contents( $manifest_path );
-		$manifest      = json_decode( $manifest_json, true );
+		$manifest_json = self::read_file_cached( $manifest_path );
+		$manifest      = json_decode( (string) $manifest_json, true );
 
 		if ( ! is_array( $manifest ) ) {
 			wp_send_json_error( array( 'message' => 'Invalid manifest JSON.' ) );
+			return;
+		}
+
+		// Compatibility gate (Issue #1433): if the manifest declares a minimum
+		// assistant-spec version this core does not implement, return an actionable
+		// "please update" error instead of a confusing schema failure. Format-guarded:
+		// only a well-formed 3-part semver string is honored, so unvalidated input
+		// cannot crash version_compare() (non-string) nor let a 4-part product version
+		// ("5.2.1.0") be mistaken for a spec requirement. Anything else falls through
+		// to the schema validator below (E_SCHEMA_PATTERN).
+		// /D anchors $ to the very end (no trailing newline), matching JS/ajv's default
+		// so a value like "2.9.0\n" is treated the same by PHP and the schema validator.
+		$min_core = isset( $manifest['min_core_version'] ) ? $manifest['min_core_version'] : null;
+		if ( is_string( $min_core ) && preg_match( '/^\d+\.\d+\.\d+$/D', $min_core ) ) {
+			if ( version_compare( $min_core, QAHM_ASSISTANT_SPEC_VERSION, '>' ) ) {
+				wp_send_json_error(
+					array(
+						'message'    => __( 'This assistant requires a newer version of QA Assistants. Please update the plugin.', 'qa-heatmap-analytics' ),
+						'error_code' => 'E_CORE_TOO_OLD',
+						'required'   => $min_core,
+						'current'    => QAHM_ASSISTANT_SPEC_VERSION,
+					),
+					409
+				);
+				return;
+			}
+		}
+
+		// Defense line: validate the manifest against the JSON Schema (Draft 7) before
+		// delivering it, so a client that bypasses the JS validator cannot feed a
+		// malformed manifest to the runtime. Structural checks (E_SCHEMA_*) AND
+		// reference-integrity checks (E_REF_*) — Issue #1581 で JS 側と同じ検査を PHP が持ち、
+		// 翻訳（lang/*.json）も渡す＝「門番はホストの PHP に1人」（親 #1578）。翻訳の読み込みは
+		// QAHM_Assistant_Schema_Validator::load_translations() が唯一の正本（ここに複製しない）。
+		// 検査に渡す翻訳は全 locale。配信で返す $translations（下）は表示用＝現在 locale の1枚のまま。
+		$validation = QAHM_Assistant_Schema_Validator::validate(
+			$manifest_json,
+			QAHM_Assistant_Schema_Validator::load_translations( $plugin_dir )
+		);
+		if ( ! $validation['valid'] ) {
+			wp_send_json_error(
+				array(
+					'message'    => 'Manifest failed schema validation.',
+					'error_code' => 'E_SCHEMA_VALIDATION',
+					'errors'     => $validation['errors'],
+				),
+				400
+			);
 			return;
 		}
 
@@ -90,6 +137,17 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$system_vars = array(
 			'tracking_id' => $tracking_id,
 			'locale'      => $locale_short,
+			'tz'          => wp_timezone_string() ?: 'Asia/Tokyo',
+		);
+
+		// Issue #1535: 会話エクスポートの記録メタは system_vars と別キーで運ぶ。
+		// system_vars に足すと runtime の $sys.* 解決（許可リスト無し）で manifest から
+		// 読めてしまい「validator は INVALID・runtime は解決」の宣言⇔実装ドリフトになる
+		// （セルフレビュー 🟡-1）。別キーなら $sys.* の語彙面は 1 バイトも変わらない。
+		// 読み手は launcher（assistant-ai-manifest.js）→ exporter のみ。
+		$export_meta = array(
+			'spec_version' => QAHM_ASSISTANT_SPEC_VERSION,
+			'site_label'   => $this->get_site_label( $tracking_id ),
 		);
 
 		wp_send_json_success(
@@ -97,8 +155,43 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 				'manifest'     => $manifest,
 				'translations' => $translations,
 				'system_vars'  => $system_vars,
+				'export_meta'  => $export_meta,
 			)
 		);
+	}
+
+	/**
+	 * tracking_id からサイトの表示ラベル（url / domain）を引く — Issue #1535。
+	 *
+	 * 会話エクスポートの記録メタは数ヶ月後に人が読む＝tracking_id（ハッシュ）だけでは
+	 * どのサイトか判らないため、sitemanage の url（無ければ domain）を併記する。
+	 * 'all'・未登録 id は空文字（呼び出し側で tracking_id のみ表示に縮退）。
+	 * status は意図的に見ない（255＝削除済みサイトでも label を返す）＝「どのサイトを
+	 * 分析した会話か」の記録用途では、後から削除されたサイトも名前で残る方が正しい。
+	 *
+	 * @param string $tracking_id トラッキング ID。
+	 * @return string サイトラベル（例: "example.com/"）。不明なら ''。
+	 */
+	private function get_site_label( $tracking_id ) {
+		if ( ! is_string( $tracking_id ) || '' === $tracking_id || 'all' === $tracking_id ) {
+			return '';
+		}
+		$sitemanage = $this->wrap_get_option( 'sitemanage' );
+		if ( ! is_array( $sitemanage ) ) {
+			return '';
+		}
+		foreach ( $sitemanage as $site ) {
+			if ( is_array( $site ) && isset( $site['tracking_id'] ) && $site['tracking_id'] === $tracking_id ) {
+				if ( isset( $site['url'] ) && is_string( $site['url'] ) && '' !== $site['url'] ) {
+					return $site['url'];
+				}
+				if ( isset( $site['domain'] ) && is_string( $site['domain'] ) && '' !== $site['domain'] ) {
+					return $site['domain'];
+				}
+				return '';
+			}
+		}
+		return '';
 	}
 
 	/**
@@ -119,23 +212,12 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$query_raw = isset( $_POST['query'] ) ? wp_unslash( $_POST['query'] ) : '';
 		$query     = json_decode( $query_raw, true );
 
-		if ( ! is_array( $query ) || empty( $query['material'] ) ) {
+		if ( ! is_array( $query ) ) {
 			wp_send_json_error( array( 'message' => 'Invalid query parameter.' ) );
 			return;
 		}
 
-		$tracking_id = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
-		if ( empty( $tracking_id ) ) {
-			$tracking_id = 'all';
-		}
-
-		// Convert manifest simplified query to QAL native format
-		$qal_native = $this->convert_to_qal_native( $query, $tracking_id );
-
-		if ( isset( $qal_native['error'] ) ) {
-			wp_send_json_error( array( 'message' => $qal_native['error'] ) );
-			return;
-		}
+		$qal_native = $query;
 
 		// Execute QAL
 		global $qahm_qal_executor;
@@ -148,12 +230,17 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$executable_qal = $qahm_qal_executor->qal_build_execute_plan( array( 'qal' => $qal_native ) );
 
 		if ( isset( $executable_qal['error_code'] ) ) {
-			wp_send_json_error(
-				array(
-					'message'    => isset( $executable_qal['message'] ) ? $executable_qal['message'] : 'QAL validation failed.',
-					'error_code' => $executable_qal['error_code'],
-				)
+			$error_payload = array(
+				'message'    => isset( $executable_qal['message'] ) ? $executable_qal['message'] : 'QAL validation failed.',
+				'error_code' => $executable_qal['error_code'],
 			);
+			if ( isset( $executable_qal['location'] ) ) {
+				$error_payload['location'] = $executable_qal['location'];
+			}
+			if ( isset( $executable_qal['details'] ) ) {
+				$error_payload['details'] = $executable_qal['details'];
+			}
+			wp_send_json_error( $error_payload );
 			return;
 		}
 
@@ -161,12 +248,17 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$response = $qahm_qal_executor->qal_executor( $executable_qal );
 
 		if ( isset( $response['error_code'] ) ) {
-			wp_send_json_error(
-				array(
-					'message'    => isset( $response['message'] ) ? $response['message'] : 'QAL execution failed.',
-					'error_code' => $response['error_code'],
-				)
+			$error_payload = array(
+				'message'    => isset( $response['message'] ) ? $response['message'] : 'QAL execution failed.',
+				'error_code' => $response['error_code'],
 			);
+			if ( isset( $response['location'] ) ) {
+				$error_payload['location'] = $response['location'];
+			}
+			if ( isset( $response['details'] ) ) {
+				$error_payload['details'] = $response['details'];
+			}
+			wp_send_json_error( $error_payload );
 			return;
 		}
 
@@ -176,7 +268,12 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 	/**
 	 * AJAX: Read config data for assistant plugins
 	 *
-	 * Security: 4-layer check (permissions, whitelist, capability, nonce)
+	 * Security: login + shared nonce ('api', shared by the data-API and
+	 * assistant AJAX endpoints) + manage_options capability + category
+	 * whitelist + manifest-declared permission. The manifest permission is
+	 * self-declared by the plugin — a convention that keeps plugins honest,
+	 * not a trust boundary. The effective boundary is the manage_options
+	 * capability check.
 	 */
 	public function ajax_read_config() {
 		if ( ! is_user_logged_in() ) {
@@ -189,7 +286,7 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			die( 'nonce error' );
 		}
 
-		// Layer 3: WordPress capability
+		// Capability check — the effective trust boundary
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
 			return;
@@ -198,6 +295,8 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$category    = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'category' ) );
 		$tracking_id = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
 		$plugin_id   = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'plugin_id' ) );
+		$store       = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'store' ) );
+		$key         = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'key' ) );
 
 		if ( empty( $category ) || empty( $tracking_id ) || empty( $plugin_id ) ) {
 			wp_send_json_error( array( 'message' => 'Missing required parameters.' ) );
@@ -210,27 +309,39 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			return;
 		}
 
-		// Layer 2: Whitelist check
+		// Category whitelist
 		if ( ! in_array( $category, QAHM_CONFIG_READABLE_CATEGORIES, true ) ) {
 			wp_send_json_error( array( 'message' => 'Category not readable: ' . $category ) );
 			return;
 		}
 
-		// Layer 1: Permission check (manifest declares what it needs)
-		if ( ! $this->check_plugin_permission( $plugin_id, 'config_read', $category ) ) {
-			wp_send_json_error( array( 'message' => 'Plugin does not have config_read permission for: ' . $category ) );
+		// custom_data requires a store name
+		if ( 'custom_data' === $category && empty( $store ) ) {
+			wp_send_json_error( array( 'message' => 'Missing store for custom_data.' ) );
+			return;
+		}
+
+		// Manifest-declared permission (self-declared by the plugin; advisory — see docblock)
+		// For custom_data, permission is granted per store (not the literal 'custom_data' string)
+		$permission_target = ( 'custom_data' === $category ) ? $store : $category;
+		if ( ! $this->check_plugin_permission( $plugin_id, 'config_read', $permission_target ) ) {
+			wp_send_json_error( array( 'message' => 'Plugin does not have config_read permission for: ' . $permission_target ) );
 			return;
 		}
 
 		// Read data by category
-		$data = $this->read_config_data( $category, $tracking_id );
+		$data = $this->read_config_data( $category, $tracking_id, $plugin_id, $store, $key );
 		wp_send_json_success( $data );
 	}
 
 	/**
 	 * AJAX: Write config data for assistant plugins
 	 *
-	 * Security: 4-layer check + operation-specific nonce + audit log
+	 * Security: same checks as ajax_read_config (login + shared 'api' nonce +
+	 * manage_options + writable-category whitelist + manifest-declared
+	 * permission), plus an audit log entry for every write attempt that
+	 * passes value validation. The nonce is the shared NONCE_API ('api'),
+	 * not operation-specific.
 	 */
 	public function ajax_write_config() {
 		if ( ! is_user_logged_in() ) {
@@ -243,7 +354,7 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			die( 'nonce error' );
 		}
 
-		// Layer 3: WordPress capability
+		// Capability check — the effective trust boundary
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
 			return;
@@ -252,10 +363,16 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$category    = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'category' ) );
 		$tracking_id = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
 		$plugin_id   = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'plugin_id' ) );
+		$store       = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'store' ) );
 		$key         = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'key' ) );
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 		$value_raw = isset( $_POST['value'] ) ? wp_unslash( $_POST['value'] ) : '';
 		$value     = json_decode( $value_raw, true );
+		// Issue #1228 (Stage A): optional rotate option for custom_data.
+		// Format: { "max_entries": 1000, "strategy": "oldest" }
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+		$rotate_raw = isset( $_POST['rotate'] ) ? wp_unslash( $_POST['rotate'] ) : '';
+		$rotate     = ( '' !== $rotate_raw ) ? json_decode( $rotate_raw, true ) : null;
 
 		if ( empty( $category ) || empty( $tracking_id ) || empty( $plugin_id ) ) {
 			wp_send_json_error( array( 'message' => 'Missing required parameters.' ) );
@@ -268,15 +385,23 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			return;
 		}
 
-		// Layer 2: Whitelist check
+		// Category whitelist
 		if ( ! in_array( $category, QAHM_CONFIG_WRITABLE_CATEGORIES, true ) ) {
 			wp_send_json_error( array( 'message' => 'Category not writable: ' . $category ) );
 			return;
 		}
 
-		// Layer 1: Permission check
-		if ( ! $this->check_plugin_permission( $plugin_id, 'config_write', $category ) ) {
-			wp_send_json_error( array( 'message' => 'Plugin does not have config_write permission for: ' . $category ) );
+		// custom_data requires a store name
+		if ( 'custom_data' === $category && empty( $store ) ) {
+			wp_send_json_error( array( 'message' => 'Missing store for custom_data.' ) );
+			return;
+		}
+
+		// Manifest-declared permission (self-declared by the plugin; advisory — see docblock)
+		// For custom_data, permission is granted per store (not the literal 'custom_data' string)
+		$permission_target = ( 'custom_data' === $category ) ? $store : $category;
+		if ( ! $this->check_plugin_permission( $plugin_id, 'config_write', $permission_target ) ) {
+			wp_send_json_error( array( 'message' => 'Plugin does not have config_write permission for: ' . $permission_target ) );
 			return;
 		}
 
@@ -285,7 +410,7 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			return;
 		}
 
-		// Layer 4: Audit log
+		// Audit log
 		global $qahm_log;
 		$qahm_log->info(
 			sprintf(
@@ -299,7 +424,7 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		);
 
 		// Write data by category
-		$result = $this->write_config_data( $category, $tracking_id, $key, $value );
+		$result = $this->write_config_data( $category, $tracking_id, $plugin_id, $store, $key, $value, $rotate );
 		if ( isset( $result['error'] ) ) {
 			wp_send_json_error(
 				array(
@@ -316,6 +441,34 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		}
 
 		wp_send_json_success( $result );
+	}
+
+	/**
+	 * Read a file with request-scoped memoization.
+	 *
+	 * Assistant manifests / lang files cannot change mid-request, so cache the
+	 * raw contents. With the init-hook scan removed, in-request duplicate reads
+	 * are rare; this is cheap insurance so call sites (list building, delivery,
+	 * permission checks, translations) never need to care how often they read. Negative
+	 * results (missing or unreadable file) are cached too. Returns the same
+	 * string|false shape as file_get_contents() so call sites keep their
+	 * original guards unchanged.
+	 *
+	 * @param string $path Absolute file path.
+	 * @return string|false File contents, or false if missing/unreadable.
+	 */
+	private static function read_file_cached( $path ) {
+		static $cache = array();
+		if ( array_key_exists( $path, $cache ) ) {
+			return $cache[ $path ];
+		}
+		$content = false;
+		if ( file_exists( $path ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- WP_Filesystem may use FTP mode.
+			$content = file_get_contents( $path );
+		}
+		$cache[ $path ] = $content;
+		return $content;
 	}
 
 	/**
@@ -337,9 +490,8 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		// Try manifest.json first
 		$manifest_path = $plugin_dir . '/manifest.json';
 		if ( file_exists( $manifest_path ) ) {
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- WP_Filesystem may use FTP mode.
-			$manifest_json = file_get_contents( $manifest_path );
-			$manifest      = json_decode( $manifest_json, true );
+			$manifest_json = self::read_file_cached( $manifest_path );
+			$manifest      = json_decode( (string) $manifest_json, true );
 			if ( is_array( $manifest ) && isset( $manifest['permissions'][ $permission ] ) ) {
 				$allowed = $manifest['permissions'][ $permission ];
 				return is_array( $allowed ) && in_array( $category, $allowed, true );
@@ -350,9 +502,8 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		// Fallback: try config.json (Legacy plugins)
 		$config_path = $plugin_dir . '/config.json';
 		if ( file_exists( $config_path ) ) {
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- WP_Filesystem may use FTP mode.
-			$config_json = file_get_contents( $config_path );
-			$config      = json_decode( $config_json, true );
+			$config_json = self::read_file_cached( $config_path );
+			$config      = json_decode( (string) $config_json, true );
 			if ( is_array( $config ) && isset( $config['permissions'][ $permission ] ) ) {
 				$allowed = $config['permissions'][ $permission ];
 				return is_array( $allowed ) && in_array( $category, $allowed, true );
@@ -368,9 +519,12 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 	 *
 	 * @param string $category    Config category
 	 * @param string $tracking_id Tracking ID
+	 * @param string $plugin_id   Plugin slug (required for custom_data)
+	 * @param string $store Store name (required for custom_data)
+	 * @param string $key         Item key (optional, custom_data returns specific key when given)
 	 * @return array Data with meta information
 	 */
-	private function read_config_data( $category, $tracking_id ) {
+	private function read_config_data( $category, $tracking_id, $plugin_id = '', $store = '', $key = '' ) {
 		global $qahm_data_api;
 
 		switch ( $category ) {
@@ -408,6 +562,9 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 					'items' => $items,
 				);
 
+			case 'custom_data':
+				return $this->read_custom_data( $plugin_id, $store, $key );
+
 			default:
 				return array( 'items' => array() );
 		}
@@ -418,16 +575,23 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 	 *
 	 * @param string $category    Config category
 	 * @param string $tracking_id Tracking ID
-	 * @param string $key         Item key (e.g. gid for goals)
-	 * @param array  $value       Data to write
+	 * @param string $plugin_id   Plugin slug (required for custom_data)
+	 * @param string $store Store name (required for custom_data)
+	 * @param string     $key         Item key (e.g. gid for goals, arbitrary key for custom_data)
+	 * @param array      $value       Data to write
+	 * @param array|null $rotate      Optional rotate config from manifest (Issue #1228), custom_data only.
+	 *                                Expected shape: { max_entries: int, strategy: string }. Null = no rotate.
 	 * @return array Result or error
 	 */
-	private function write_config_data( $category, $tracking_id, $key, $value ) {
+	private function write_config_data( $category, $tracking_id, $plugin_id, $store, $key, $value, $rotate = null ) {
 		global $qahm_data_api;
 
 		switch ( $category ) {
 			case 'goals':
 				return $this->write_goals_config( $tracking_id, $key, $value );
+
+			case 'custom_data':
+				return $this->write_custom_data( $plugin_id, $store, $key, $value, $rotate );
 
 			default:
 				return array(
@@ -566,123 +730,6 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 	}
 
 	/**
-	 * Convert manifest simplified query to QAL native format
-	 *
-	 * Manifest format:
-	 *   { material: "allpv", columns: ["page_id", "title"], filter: { tracking_id: { eq: "..." }, date: { between: [...] } } }
-	 *
-	 * QAL native format:
-	 *   { tracking_id: "...", materials: [{ name: "allpv" }], time: { start, end, tz }, make: { view: { from: [...], keep: [...] } }, result: { use: "view", limit: 10000 } }
-	 *
-	 * @param array  $query       Manifest simplified query
-	 * @param string $tracking_id Tracking ID
-	 * @return array QAL native format or error array
-	 */
-	private function convert_to_qal_native( $query, $tracking_id ) {
-		$material = sanitize_text_field( $query['material'] );
-
-		// Allowed materials
-		$allowed_materials = array( 'allpv', 'gsc', 'goal_x' );
-		if ( ! in_array( $material, $allowed_materials, true ) ) {
-			return array( 'error' => 'Unknown material: ' . $material );
-		}
-
-		// Build time from date filter
-		$time = $this->extract_time_from_filter( $query );
-
-		// Build keep columns with material prefix
-		$keep = array();
-		if ( ! empty( $query['columns'] ) && is_array( $query['columns'] ) ) {
-			foreach ( $query['columns'] as $col ) {
-				$keep[] = $material . '.' . sanitize_text_field( $col );
-			}
-		}
-
-		// Build QAL native
-		$qal_native = array(
-			'tracking_id' => $tracking_id,
-			'materials'   => array( array( 'name' => $material ) ),
-			'time'        => $time,
-			'make'        => array(
-				'view' => array(
-					'from' => array( $material ),
-				),
-			),
-			'result'      => array(
-				'use'   => 'view',
-				'limit' => 10000,
-			),
-		);
-
-		if ( ! empty( $keep ) ) {
-			$qal_native['make']['view']['keep'] = $keep;
-		}
-
-		// Build filter conditions from manifest filter (excluding tracking_id and date)
-		$filter_conditions = $this->build_filter_conditions( $query );
-		if ( ! empty( $filter_conditions ) ) {
-			$qal_native['make']['view']['filter'] = $filter_conditions;
-		}
-
-		return $qal_native;
-	}
-
-	/**
-	 * Build QAL filter conditions from manifest filter
-	 *
-	 * Converts manifest filter operators to QAL native filter format.
-	 * Skips tracking_id (handled as top-level param) and date (handled as time).
-	 *
-	 * @param array $query Manifest query
-	 * @return array Filter conditions for QAL native, or empty array
-	 */
-	private function build_filter_conditions( $query ) {
-		if ( ! isset( $query['filter'] ) || ! is_array( $query['filter'] ) ) {
-			return array();
-		}
-
-		$filter         = $query['filter'];
-		$conditions     = array();
-		$special_fields = array( 'tracking_id', 'date' );
-
-		foreach ( $filter as $field => $operators ) {
-			$field = sanitize_text_field( $field );
-			if ( in_array( $field, $special_fields, true ) ) {
-				continue;
-			}
-			if ( ! is_array( $operators ) ) {
-				continue;
-			}
-
-			$sanitized = array();
-			foreach ( $operators as $op => $value ) {
-				$op = sanitize_text_field( $op );
-				// TODO: Use esc_url_raw() for URL values when field type info is available from manifest
-				$sanitized[ $op ] = $this->sanitize_filter_value( $value );
-			}
-
-			if ( ! empty( $sanitized ) ) {
-				$conditions[ $field ] = $sanitized;
-			}
-		}
-
-		return $conditions;
-	}
-
-	/**
-	 * Sanitize a filter value
-	 *
-	 * @param mixed $value Value to sanitize
-	 * @return mixed Sanitized value
-	 */
-	private function sanitize_filter_value( $value ) {
-		if ( is_array( $value ) ) {
-			return array_map( 'sanitize_text_field', $value );
-		}
-		return sanitize_text_field( $value );
-	}
-
-	/**
 	 * Build a manifest-based assistant entry from its directory
 	 *
 	 * Reads manifest.json, loads translations, resolves icon URL.
@@ -697,9 +744,8 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			return false;
 		}
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- WP_Filesystem may use FTP mode.
-		$manifest_json = file_get_contents( $manifest_file );
-		$manifest      = json_decode( $manifest_json, true );
+		$manifest_json = self::read_file_cached( $manifest_file );
+		$manifest      = json_decode( (string) $manifest_json, true );
 		if ( ! $manifest ) {
 			return false;
 		}
@@ -715,6 +761,20 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		$icon_file    = isset( $manifest['icon'] ) ? $manifest['icon'] : 'icon.png';
 		$icon_url     = content_url( $relative_dir . '/' . $icon_file );
 
+		// Issue #1580（検査 段2）: パッケージ検査＝一覧に出す直前の門番。
+		// 既定は「警告のみ」＝不合格でも一覧から消さず、理由を持たせて画面に出す
+		// （QAHM_ASSISTANT_PKG_STRICT が真のときだけ一覧から外す）。判定は QAHM_Assistant_Schema_Validator
+		// に集約（門番はホストの PHP に1人＝#1578）。検査自体が例外で落ちても一覧は壊さない。
+		$pkg = array( 'valid' => true, 'strict' => false, 'errors' => array() );
+		try {
+			$pkg = QAHM_Assistant_Schema_Validator::validate_package( $dir, $slug );
+		} catch ( \Throwable $e ) {
+			$pkg = array( 'valid' => false, 'strict' => false, 'errors' => array( array( 'code' => 'E_PKG_INTERNAL', 'path' => '/', 'message' => $e->getMessage() ) ) );
+		}
+		if ( ! $pkg['valid'] && ! empty( $pkg['strict'] ) ) {
+			return false; // ブロックモード＝一覧に出さない（既定 OFF）
+		}
+
 		return array(
 			'slug'         => $slug,
 			'name'         => $this->resolve_manifest_translation( isset( $manifest['name'] ) ? $manifest['name'] : $slug, $translations ),
@@ -723,6 +783,13 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			'version'      => isset( $manifest['version'] ) ? $manifest['version'] : ( $plugin_data['Version'] ?? '' ),
 			'images'       => array( 'default' => $icon_url ),
 			'manifest_url' => true,
+			// 段2＝パッケージ検査の結果（警告のみモードでは画面にバッジ＋理由を出す材料）
+			'package'      => array(
+				'valid'  => (bool) $pkg['valid'],
+				'errors' => array_values( array_map( function ( $e ) {
+					return array( 'code' => $e['code'], 'path' => $e['path'], 'message' => $e['message'] );
+				}, $pkg['errors'] ) ),
+			),
 		);
 	}
 
@@ -749,9 +816,8 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			return array();
 		}
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- WP_Filesystem may use FTP mode.
-		$json         = file_get_contents( $file_path );
-		$translations = json_decode( $json, true );
+		$json         = self::read_file_cached( $file_path );
+		$translations = json_decode( (string) $json, true );
 
 		if ( ! is_array( $translations ) ) {
 			return array();
@@ -788,31 +854,205 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 	}
 
 	/**
-	 * Extract time parameters from manifest filter
+	 * Build a sanitized path for a custom_data file.
 	 *
-	 * @param array $query Manifest query with filter
-	 * @return array Time array for QAL { start, end, tz }
+	 * Both plugin_id and store are validated against a strict whitelist
+	 * to prevent path traversal.
+	 *
+	 * @param string $plugin_id   Plugin slug
+	 * @param string $store Store name
+	 * @return string|false Full file path on success, false on validation failure
 	 */
-	private function extract_time_from_filter( $query ) {
-		$start = '';
-		$end   = '';
+	private function get_custom_data_path( $plugin_id, $store ) {
+		if ( ! preg_match( '/^[a-zA-Z0-9_-]+$/', $plugin_id ) ) {
+			return false;
+		}
+		if ( ! preg_match( '/^[a-zA-Z0-9_]+$/', $store ) ) {
+			return false;
+		}
+		return WP_CONTENT_DIR . '/qa-zero-data/assistants/' . $plugin_id . '/' . $store . '.json';
+	}
 
-		if ( isset( $query['filter']['date']['between'] ) && is_array( $query['filter']['date']['between'] ) ) {
-			$between = $query['filter']['date']['between'];
-			$start   = isset( $between[0] ) ? sanitize_text_field( $between[0] ) : '';
-			$end     = isset( $between[1] ) ? sanitize_text_field( $between[1] ) : '';
+	/**
+	 * Read custom_data file.
+	 *
+	 * @param string $plugin_id   Plugin slug
+	 * @param string $store Store name
+	 * @param string $key         Optional specific key to extract (empty = full object)
+	 * @return array { items: mixed } Full object when key is empty, single value when key is given, null when missing
+	 */
+	private function read_custom_data( $plugin_id, $store, $key = '' ) {
+		$path = $this->get_custom_data_path( $plugin_id, $store );
+		if ( false === $path || ! $this->wrap_exists( $path ) ) {
+			return array( 'items' => '' === $key ? array() : null );
 		}
 
-		// Use WordPress timezone setting
-		$tz = wp_timezone_string();
-		if ( empty( $tz ) ) {
-			$tz = 'Asia/Tokyo';
+		$json = $this->wrap_get_contents( $path );
+		$data = json_decode( $json, true );
+		if ( ! is_array( $data ) ) {
+			$data = array();
+		}
+
+		if ( '' !== $key ) {
+			return array( 'items' => isset( $data[ $key ] ) ? $data[ $key ] : null );
+		}
+		return array( 'items' => $data );
+	}
+
+	/**
+	 * Write to a custom_data file.
+	 *
+	 * Reads the existing file, sets the given key to the value, and writes back.
+	 * Creates the parent directory if missing.
+	 *
+	 * @param string     $plugin_id   Plugin slug
+	 * @param string     $store Store name
+	 * @param string     $key         Item key
+	 * @param array      $value       Value to store
+	 * @param array|null $rotate      Optional rotate config from manifest (Issue #1228).
+	 *                                Expected shape: { max_entries: int, strategy: string }. Null = no rotate.
+	 * @return array Result with status or error
+	 */
+	private function write_custom_data( $plugin_id, $store, $key, $value, $rotate = null ) {
+		$path = $this->get_custom_data_path( $plugin_id, $store );
+		if ( false === $path ) {
+			return array(
+				'error'  => 'Invalid plugin_id or store.',
+				'reason' => 'validation_error',
+			);
+		}
+		if ( '' === $key ) {
+			return array(
+				'error'  => 'Missing key for custom_data write.',
+				'reason' => 'validation_error',
+			);
+		}
+
+		// Issue #1200: enforce value size limit before touching the filesystem.
+		// Done early so callers fail fast with a clear reason ('size_limit_value') instead
+		// of wasting work on mkdir/read/merge for a value that will be rejected.
+		$value_json = wp_json_encode( $value, JSON_UNESCAPED_UNICODE );
+		if ( false === $value_json ) {
+			// Encoding failure (invalid UTF-8 / resource type / recursion) is a validation problem,
+			// not a size problem — separate reason so AI / developer can react accordingly.
+			return array(
+				'error'  => 'Failed to encode custom_data value as JSON.',
+				'reason' => 'validation_error',
+			);
+		}
+		if ( strlen( $value_json ) > QAHM_CUSTOM_DATA_VALUE_MAX_BYTES ) {
+			return array(
+				'error'  => sprintf(
+					/* translators: %d: maximum value size in bytes */
+					'custom_data value exceeds limit (%d bytes). Trim the value or split across multiple keys.',
+					QAHM_CUSTOM_DATA_VALUE_MAX_BYTES
+				),
+				'reason' => 'size_limit_value',
+			);
+		}
+
+		// Ensure parent directory exists (recursive).
+		// wrap_mkdir() creates only a single level via $wp_filesystem->mkdir() and does not create
+		// parent directories. For first-time custom_data write, the path is
+		// {WP_CONTENT_DIR}/qa-zero-data/assistants/{plugin_id}/{store}.json
+		// (e.g. .../qa-assistant-lp-inspector/lp_history.json) — three levels deep — so
+		// wp_mkdir_p() (WP core, recursive) is required.
+		// Note: the wrap_exists() short-circuit is technically redundant since wp_mkdir_p() is
+		// idempotent, but kept for filesystem-layer consistency with other write paths.
+		$dir = dirname( $path );
+		if ( ! $this->wrap_exists( $dir ) && ! wp_mkdir_p( $dir ) ) {
+			return array(
+				'error'  => 'Failed to create custom_data directory.',
+				'reason' => 'server_error',
+			);
+		}
+
+		// Merge with existing data if any.
+		$data = array();
+		if ( $this->wrap_exists( $path ) ) {
+			$existing_json = $this->wrap_get_contents( $path );
+			$existing      = json_decode( $existing_json, true );
+			if ( is_array( $existing ) ) {
+				$data = $existing;
+			}
+		}
+
+		$data[ $key ] = $value;
+
+		// Issue #1228 (Stage A): enforce key count limit with optional rotate.
+		// rotate option is declared via manifest's config_write step:
+		//   "rotate": { "max_entries": 1000, "strategy": "oldest" }
+		// When declared and valid, oldest keys are auto-evicted to maintain the limit
+		// (PHP associative arrays preserve insertion order; first key = oldest).
+		// When undeclared or invalid, returns 'limit_key_count' reason so manifest
+		// author can react via on_error scene.
+		$rotate_max_entries = null;
+		if ( is_array( $rotate ) && isset( $rotate['max_entries'] ) ) {
+			// R9 validation: max_entries must be a positive integer within hard limit,
+			// strategy must be in allowlist. Invalid rotate falls back to limit_key_count
+			// (same error path as missing rotate) so behavior is predictable.
+			$max = $rotate['max_entries'];
+			if ( is_int( $max ) && $max > 0 && $max <= QAHM_CUSTOM_DATA_KEY_MAX_COUNT ) {
+				$strategy = isset( $rotate['strategy'] ) ? $rotate['strategy'] : 'oldest';
+				if ( in_array( $strategy, array( 'oldest' ), true ) ) {
+					$rotate_max_entries = $max;
+				}
+			}
+		}
+
+		if ( null !== $rotate_max_entries ) {
+			// rotate declared and valid — auto-evict oldest keys.
+			// Existing key updates do not increase count (PHP array semantics),
+			// so updates remain possible even at the limit.
+			while ( count( $data ) > $rotate_max_entries ) {
+				reset( $data );
+				unset( $data[ key( $data ) ] );
+			}
+		} elseif ( count( $data ) > QAHM_CUSTOM_DATA_KEY_MAX_COUNT ) {
+			// No (valid) rotate declared and key count exceeds hard limit.
+			return array(
+				'error'  => sprintf(
+					/* translators: %d: maximum key count per store file */
+					'custom_data key count exceeds limit (%d entries). Declare a rotate option (config_write.rotate.max_entries) or prune older keys.',
+					QAHM_CUSTOM_DATA_KEY_MAX_COUNT
+				),
+				'reason' => 'limit_key_count',
+			);
+		}
+
+		$json = wp_json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE );
+
+		// Issue #1200: enforce per-file size limit after merge. The merged size depends on
+		// pre-existing keys, so this check has to happen post-merge and can't be moved earlier.
+		if ( false === $json ) {
+			// Encoding the merged data failed — surface as validation error, not size error.
+			return array(
+				'error'  => 'Failed to encode custom_data file as JSON after merge.',
+				'reason' => 'validation_error',
+			);
+		}
+		if ( strlen( $json ) > QAHM_CUSTOM_DATA_FILE_MAX_BYTES ) {
+			return array(
+				'error'  => sprintf(
+					/* translators: %d: maximum file size in bytes */
+					'custom_data file would exceed limit (%d bytes) after merge. Rotate / prune older entries before writing.',
+					QAHM_CUSTOM_DATA_FILE_MAX_BYTES
+				),
+				'reason' => 'size_limit_file',
+			);
+		}
+
+		$written = $this->wrap_put_contents( $path, $json );
+		if ( false === $written ) {
+			return array(
+				'error'  => 'Failed to write custom_data file.',
+				'reason' => 'server_error',
+			);
 		}
 
 		return array(
-			'start' => $start,
-			'end'   => $end,
-			'tz'    => $tz,
+			'status' => 'done',
+			'key'    => $key,
 		);
 	}
 }

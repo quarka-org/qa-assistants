@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/manifest.schema.json",
+  "title": "QA Assistant Manifest",
+  "description": "Root schema for manifest.json of a QA Assistants manifest-based assistant plugin. The authoritative spec version and revision history live in docs/specs/assistant/overview.md (kept in sync with QAHM_ASSISTANT_SPEC_VERSION by CI).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "icon", "name", "description", "vars", "data_sources", "scenes"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^qa-assistant-[a-z0-9-]+$",
+      "description": "Plugin slug. Must match the directory name (qa-assistant-{name})."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "4-part version (MAJOR.MINOR.PATCH.BUILD)."
+    },
+    "icon": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1, "description": "Display name. May be a 't:' translation reference." },
+    "description": { "type": "string", "description": "May be a 't:' translation reference." },
+    "min_core_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Optional. Minimum assistant-spec version (3-part semver) the core must implement. If the core's QAHM_ASSISTANT_SPEC_VERSION is lower, the manifest is rejected at delivery with E_CORE_TOO_OLD (please-update). Omit for maximum compatibility."
+    },
+    "permissions": { "$ref": "definitions/permissions.schema.json" },
+    "vars": { "$ref": "definitions/vars.schema.json" },
+    "lookups": { "$ref": "definitions/lookups.schema.json" },
+    "data_sources": {
+      "type": "object",
+      "minProperties": 0,
+      "patternProperties": { "^[a-z][a-z0-9_]*$": { "$ref": "definitions/data-source.schema.json" } },
+      "additionalProperties": false
+    },
+    "tables": {
+      "type": "object",
+      "patternProperties": { "^[a-z][a-z0-9_]*$": { "$ref": "definitions/table.schema.json" } },
+      "additionalProperties": false
+    },
+    "charts": {
+      "type": "object",
+      "patternProperties": { "^[a-z][a-z0-9_]*$": { "$ref": "definitions/chart.schema.json" } },
+      "additionalProperties": false
+    },
+    "scorecards": {
+      "type": "object",
+      "patternProperties": { "^[a-z][a-z0-9_]*$": { "$ref": "definitions/scorecard.schema.json" } },
+      "additionalProperties": false
+    },
+    "scenes": { "$ref": "definitions/scenes.schema.json" }
+  }
+}

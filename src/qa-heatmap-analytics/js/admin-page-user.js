@@ -18,7 +18,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: '', hidden: true },	// 現在未使用
 		{ key: 'session', label: qahml10n['table_session'], type: 'integer', width: 10 },
 		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 10, type: 'percentage' },
-		{ key: 'page_session', label: qahml10n['table_page_session'], width: 10, type: 'float' },
+		{ key: 'page_session', label: qahml10n['table_page_session'], width: 10, type: 'float', agg: { type: 'wavg', weightKey: 'session' } }, // Issue #1175: ページ/セッションは session 加重平均
 		{ key: 'avg_session_time', label: qahml10n['table_avg_session_time'], width: 10, type: 'duration' },
 		{ key: 'goal_conversion_rate', label: qahml10n['table_goal_conversion_rate'], width: 10, type: 'percentage', typeOptions: { precision: 1 } },
 		{ key: 'goal_completions', label: qahml10n['table_goal_completions'], width: 10, type: 'integer', typeOptions: { precision: 1 } },
@@ -30,14 +30,15 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
-		maxHeight: 300,
+		columnToggle: true,
+		maxHeight: 450, // Issue #1175: 合計行ぶん縦幅を拡大
 		stickyHeader: true,
 		initialSort: {
 			column: 'user_type',
 			direction: 'asc'
 		}
 	};
-	audienceTable = qaTable.createTable('#tb_audienceDevice', audienceHeader, audienceOptions);
+	audienceTable = qaTable.createTable('#tb_audienceDevice', audienceHeader, { ...audienceOptions, totalRow: { weightKey: 'session', label: qahml10n['table_total'], initialTop: true } }); // Issue #1175: 合計行（率は session 加重平均）。initialTop=初期表示は最上段・ユーザーがソートしたら1行として動く（言語非依存）
 
     let nrdradios = document.getElementsByName( `js_nrdGoals` );
     for ( let jjj = 0; jjj < nrdradios.length; jjj++ ) {
@@ -104,6 +105,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -126,7 +128,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	let statsDownloadBtn = document.getElementById('csv-download-btn');
 	if ( statsDownloadBtn ) {
 		statsDownloadBtn.addEventListener( 'click', function() {
-			let gosign = window.confirm( qahm.sprintfAry( qahml10n['download_msg1'], moment(reportRangeStart).format('ll'), moment(reportRangeEnd).format('ll') ) + '\n' + qahml10n['download_msg2'] );
+			let gosign = window.confirm( qahm.sprintfAry( qahml10n['download_msg1'], qahm.formatDateText(reportRangeStart), qahm.formatDateText(reportRangeEnd) ) + '\n' + qahml10n['download_msg2'] );
 			if( gosign ) {
 				qahm.downloadAudienceCsv( reportRangeStart, reportRangeEnd, qahm.reportNumPvs );
 			}
@@ -165,6 +167,15 @@ jQuery(
 jQuery(document).on('qahm:dateRangeChanged', function( RangeStart, RangeEnd ) {
 	qahm.nowAjaxStep = 0;
 	qahm.renderAudienceData(reportDateBetween, dateRangeYmdAry);
+	// [Issue #1231] 訪問者テーブルは All Goals (gid=0)、セッションテーブルは All Sessions に戻るため、UI のラジオも同期させる
+	let nrdAllGoalsRadio = document.getElementById( 'js_nrdGoals_0' );
+	if ( nrdAllGoalsRadio ) {
+		nrdAllGoalsRadio.checked = true;
+	}
+	let sesRecAllRadio = document.getElementById( 'js_sesRec_0' );
+	if ( sesRecAllRadio ) {
+		sesRecAllRadio.checked = true;
+	}
 });
 
 qahm.renderAudienceData = function(dateBetweenStr, dateYmdAry) {
@@ -174,6 +185,10 @@ qahm.renderAudienceData = function(dateBetweenStr, dateYmdAry) {
 			qahm.disabledGoalRadioButton();
 			audienceTable.showLoading();
 			sesRecTable.showLoading();
+			// グラフのローディングも開始時に出す（#1294）。statsChart1 の create は最後の
+			// getOverview ステップなので、ここで出さないと先行 ajax 中はグラフ領域が空白になる。
+			// getOverview の create が自動で消す
+			qahm.EChart.loading( 'statsChart1' );
 
             qahm.nowAjaxStep = 'getRecentSessions';
             qahm.renderAudienceData(dateBetweenStr, dateYmdAry);
@@ -434,6 +449,7 @@ qahm.renderAudienceData = function(dateBetweenStr, dateYmdAry) {
 
 		case 'getOverview':
 			// graph and total
+			qahm.EChart.loading( 'statsChart1' ); // データ取得中の表情（#1294。create が自動で消す）
 			jQuery.ajax(
 				{
 					type: 'POST',
@@ -451,6 +467,9 @@ qahm.renderAudienceData = function(dateBetweenStr, dateYmdAry) {
 				}
             ).done(
                 function( data ){
+                    // R-2（Devin/セルフ推奨）: データ到着時点で先に消す。以降の集計が万一 throw しても
+                    // ローディングが残らない（dashboard conversion と同パターン）。case 0 の早出しと併用
+                    qahm.EChart.loading( 'statsChart1', false );
                     let ary = data;
 
 					// graph
@@ -479,7 +498,7 @@ qahm.renderAudienceData = function(dateBetweenStr, dateYmdAry) {
 						}
 						
 					}
-					qahm.drawAudienceGraph(dateYmdAry, overviewDataAry, true);
+					qahm.drawAudienceGraph(dateYmdAry, overviewDataAry);
 
 					// total
 					let totalOfArray = (accumulator, currentValue) => accumulator + currentValue;
@@ -521,6 +540,7 @@ qahm.renderAudienceData = function(dateBetweenStr, dateYmdAry) {
             ).fail(
                 function( jqXHR, textStatus, errorThrown ){
                     qahm.log_ajax_error( jqXHR, textStatus, errorThrown );
+                    qahm.EChart.loading( 'statsChart1', false );
                 }
             ).always(
                 function(){
@@ -576,254 +596,94 @@ qahm.drawTableAjax = function(action, table, dateBetweenStr) {
 /** ---------------------------------------------------
  * drawing graph
  */
-let statsChart1;
-qahm.drawAudienceGraph = function( dateLabelsAry, dataAry, isClear = false ) {
-	let ctx = document.getElementById("statsChart1");
-	if ( ! ctx ) {
+qahm.drawAudienceGraph = function( dateLabelsAry, dataAry ) {
+	let el = document.getElementById('statsChart1');
+	if ( ! el ) {
 		return;
 	}
 
 	// ここでラベルの表示形式を yyyy/MM/dd に変更
 	dateLabelsAry = dateLabelsAry.map(label => label.replace(/-/g, '/'));
 
-	if ( isClear ) {
-		qahm.clearPreChart(statsChart1);
-		qahm.resetCanvas('statsChart1');
-	}
-
-	let chartOneColor = {
-		users: { backgroundColor: qahm.graphColorBaseA[2], borderColor: qahm.graphColorBaseA[2] },
-		sessions: { backgroundColor: qahm.graphColorBaseA[0], borderColor: qahm.graphColorBaseA[0]},
-		pvs: { backgroundColor: qahm.graphColorBaseA[1], borderColor: qahm.graphColorBaseA[1]  },
-	};
-
-	let axisMax;
-	let axisStepSize;
-	let keepAxis = false;
-	let linePointStyle = {};
+	// 旧 Chart.js の点スタイル可変（データ点密度に応じてマーカーを調整）を ECharts で踏襲
+	let symbolSize;
+	let showSymbol = true;
 	if ( dateLabelsAry.length <= 3 ) {
-		linePointStyle = {
-			borderWidth: 3,
-			radius: 10,
-			pointHoverRadius: 15,
-		}
+		symbolSize = 10;
 	} else if ( dateLabelsAry.length > 150 ) {
-		linePointStyle = {
-			borderWidth: 2,
-			radius: 0,
-			pointHoverRadius: 3,
-		}
+		showSymbol = false; // 密集帯はマーカー非表示（tooltip は axis トリガーで機能する）
 	} else if ( dateLabelsAry.length >= 85 ) {
-		linePointStyle = {
-			borderWidth: 2.5,
-			radius: 2,
-			pointHoverRadius: 3,
-		}
-	}else {
-		linePointStyle = {
-			borderWidth: 3,
-			radius: 4,
-			pointHoverRadius: 6,
-		}
+		symbolSize = 4;
+	} else {
+		symbolSize = 6;
 	}
 
-	ctx = document.getElementById('statsChart1').getContext('2d');
-	statsChart1 = new Chart(ctx, {
-		type: 'bar',
-		data: {
-			labels: dateLabelsAry,
-			datasets: [
-				{
-					type: 'line',
-					label: qahml10n['graph_users'],
-					data: dataAry.numUsers,
-					backgroundColor: chartOneColor.users.backgroundColor,
-					borderColor: chartOneColor.users.borderColor,
-					borderJoinStyle: 'bevel',
-					borderWidth: linePointStyle.borderWidth,
-					borderDash: [10, 1, 2, 1],
-					pointStyle: 'rectRot',
-					radius: linePointStyle.radius,
-					pointHoverRadius: linePointStyle.pointHoverRadius,
-					lineTension: 0,
-					fill: false,
-					yAxisID: 'hidden-y-axis',
-					order: 3
-				},
-				{
-					type: 'line',
-					label: qahml10n['graph_sessions'],
-					data: dataAry.numSessions,
-					backgroundColor: chartOneColor.sessions.backgroundColor,
-					borderColor: chartOneColor.sessions.borderColor,
-					borderJoinStyle: 'bevel',
-					borderWidth: linePointStyle.borderWidth,
-					pointStyle: 'rect',
-					radius: linePointStyle.radius,
-					pointHoverRadius: linePointStyle.pointHoverRadius,
-					lineTension: 0,
-					fill: false,
-					yAxisID: 'hidden-y-axis',
-					order: 4
-				},
-				{
-					//type: 'bar',
-					label: qahml10n['graph_pvs'],
-					data: dataAry.numPvs,
-					backgroundColor: chartOneColor.pvs.backgroundColor,
-					borderColor: chartOneColor.pvs.borderColor,
-					borderWidth: 2,
-					maxBarThickness: 100,
-					yAxisID: 'main-y-axis',
-					order: 6
-				}
-			]
-		},
-		options: {
-			spanGaps: false,
-			responsive: true,
-			maintainAspectRatio: false,
-			title: {
-				display: false,
-				text: 'graph title',
-				padding:3
-			},
-			scales: {
-				yAxes: [{
-					id: 'main-y-axis',
-					position: 'left',
-					type: 'linear',
-					ticks: {
-						min: 0,
-					},
-					beforeBuildTicks: function(axis) {
-						if ( keepAxis ) {
-							axis.max = axisMax;
-							axis.stepSize = axisStepSize;
-						} else {
-							if( axis.max < 10 ) {
-								axis.max = 10;
-								axis.stepSize = 1;
-							}
-							axisMax = axis.max;
-							axisStepSize = axis.stepSize;
-							keepAxis = true;
-						}
-					},
-				}, {
-					id: 'hidden-y-axis',
-					position: 'right',
-   					type: 'linear',
-					gridLines: {
-						display: false
-					},
-					ticks: {
-						min: 0,
-						display: false
-					},
-					beforeBuildTicks: function(axis) {
-						axis.max = axisMax;
-						axis.stepSize = axisStepSize;
-					}
-				}],
-				xAxes: [{
-					stacked: true,
-					ticks: {
-						autoSkip: true,        // ラベルが多い場合は間引き
-						maxRotation: 0,        // 最大でも回転させない
-						minRotation: 0,        // 最小も0度（水平表示）
-						maxTicksLimit: 10      // 最大でも10個まで表示
-					}
-				}]
-			},
-			legend: {
-				display: false,
-				position: 'top',
-				labels: {
-					usePointStyle: true
-				}
-			},
-			legendCallback: function(chart) {
-				let legendHtml = [];
-				let labelDeco;
-				legendHtml.push('<ul>');
-				let dataSet = chart.data.datasets;
-				for ( let lll = 0; lll < dataSet.length; lll++ ) {
-					let meta = statsChart1.getDatasetMeta(lll);
-					if( meta.hidden === true ){
-						labelDeco = 'style="text-decoration:line-through;"'
-					} else {
-						labelDeco = '';
-					}
-					/*
-					if( lll == 3 ) {
-						legendHtml.push('</ul><ul>');
-					}
-					*/
-					legendHtml.push('<li>');
-					legendHtml.push('<div class="pt-'+dataSet[lll].pointStyle+'" style="background-color:' + dataSet[lll].backgroundColor +'; border-color:'+dataSet[lll].borderColor +'"></div>');
-					legendHtml.push('<span class="legend-label"'+labelDeco +'>'+dataSet[lll].label+'</span>');
-					legendHtml.push('</li>');
-				}
-				legendHtml.push('</ul>');
-				return legendHtml.join("");
-			},
-			tooltips: {
-				mode: 'index',
-				itemSort: function(a, b, data) {
-					return (a.datasetIndex - b.datasetIndex);
-				},
-				callbacks: {
-					label: function(tooltipItem, data) {
-						let label;
-						//if ( tooltipItem.datasetIndex < 3 ) {
-							label = data.datasets[tooltipItem.datasetIndex].label + ': ' + tooltipItem.yLabel;
-						//} else {
-						//	label = 'filter';
-						//	label += data.datasets[tooltipItem.datasetIndex].label + ': ' + tooltipItem.yLabel;;
-						//}
-						return label;
-					}
+	// 現行の配色を継承（qahm.graphColorBaseA の hex 化）:
+	// users = ネイビー / sessions = ブランド青 / pvs = ライトブルー棒
+	let colorUsers    = '#31356E';
+	let colorSessions = '#69A4E2';
+	let colorPvs      = '#BAD6F4';
+
+	// 旧 beforeBuildTicks 踏襲: 最大値が小さいときは目盛り上限 10・刻み 1 を確保。
+	// それ以外は syncYAxes で左右軸の目盛りを完全同期（旧 keepAxis ロック相当）
+	let dataMax = 0;
+	[ dataAry.numPvs, dataAry.numSessions, dataAry.numUsers ].forEach( function( ary ) {
+		for ( let i = 0; i < ary.length; i++ ) {
+			if ( Number( ary[i] ) > dataMax ) {
+				dataMax = Number( ary[i] );
 			}
-
-			},
-			/*
-			onClick: function(e) {
-				let element = statsChart1.getElementAtEvent(e);
-				//console.log(element);
-				if (! element || element.length === 0) return;
-				let meIndex = element[0]._index;
-				let meLabelDate = dateLabelsAry[meIndex];
-				console.log('clicked date:', meLabelDate);
-			},
-			*/
 		}
-	});
+	} );
+	let smallScale = dataMax < 10;
 
-	// legendHere
-	document.getElementById('chart1-legend').innerHTML = statsChart1.generateLegend();
-
-	let legendItems;
-	legendItems = document.getElementById('chart1-legend').getElementsByTagName('li');
-	for (let i = 0; i < legendItems.length; i++) {
-		legendItems[i].addEventListener("click", (e) =>
-			updateDataset(e.target.parentNode, i)
-		);
-	}
-	//to switch dataset when the legend clicked
-	let updateDataset = (legendLi, index) => {
-		let meta = statsChart1.getDatasetMeta(index);
-		let labelSpan = legendLi.querySelector('span.legend-label');
-		let hiddenData = meta.hidden === true ? true : false;
-		if (hiddenData) {
-			labelSpan.style.textDecoration = "none";
-			meta.hidden = null;
-		} else {
-			labelSpan.style.textDecoration = "line-through";
-			meta.hidden = true;
-		}
-		statsChart1.update();
-	};
+	// 系列順 = 棒（pvs）を先に描き、折線を上に重ねる。
+	// 凡例は旧来の並び（Users / Sessions / PV）を legend.data で維持する
+	qahm.EChart.create( el, {
+		kind: 'combo',
+		labels: dateLabelsAry,
+		series: [
+			{
+				name: qahml10n['graph_pvs'],
+				type: 'bar',
+				data: dataAry.numPvs,
+				color: colorPvs,
+				yAxisIndex: 0,
+				barMaxWidth: 100
+			},
+			{
+				name: qahml10n['graph_sessions'],
+				type: 'line',
+				data: dataAry.numSessions,
+				color: colorSessions,
+				yAxisIndex: 1,
+				symbolSize: symbolSize,
+				showSymbol: showSymbol
+			},
+			{
+				name: qahml10n['graph_users'],
+				type: 'line',
+				data: dataAry.numUsers,
+				color: colorUsers,
+				dashed: true,
+				yAxisIndex: 1,
+				symbolSize: symbolSize,
+				showSymbol: showSymbol
+			}
+		],
+		// 左 = 表示軸（pvs）/ 右 = 非表示軸（users/sessions）。syncYAxes が全系列の最大値から
+		// 単一スケールを計算し両軸へ適用（= 旧 beforeBuildTicks の「左右同一スケール」再現）
+		yAxes: smallScale
+			? [ { max: 10, interval: 1 }, { show: false, max: 10, interval: 1 } ]
+			: [ {}, { show: false } ],
+		syncYAxes: true,
+		legend: {
+			show: true,
+			bottom: 0,
+			type: 'scroll',
+			data: [ qahml10n['graph_users'], qahml10n['graph_sessions'], qahml10n['graph_pvs'] ]
+		},
+		maxXTicks: 10
+	} );
 
 }; //end of "drawAudienceGraph" function
 

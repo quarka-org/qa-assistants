@@ -1,5 +1,10 @@
 var qahmz              = qahmz || {};
 
+// #1346: インラインタグ（qahmz.initDate 等の設定）が欠落・遅延した環境でも
+// trackingStart() が qahmz.initDate.getTime() で落ちて qtag 全体（公開 API 含む）が
+// 死なないための既定値。正規タグではインラインが先に実行されるため上書きされない。
+qahmz.initDate         = qahmz.initDate || new Date();
+
 qahmz.initBehData      = false;
 qahmz.readersName      = null;
 qahmz.readersBodyIndex = 0;
@@ -138,58 +143,36 @@ qahmz.deleteCookie = function(cookie_name){
 
 }
 
+// T49: qa_id_zはHttpOnly Cookie — JSからは読めない。サーバーが$_COOKIEで直接読む
+// getQaidfromCookie は廃止（互換性のため空実装を残す）
 qahmz.getQaidfromCookie = function(){
-
-	let qa_id_obj = { value: '', is_new_user: 0 };
-
-	let cookie_ary = qahmz.getCookieArray();
-
-	if ( cookie_ary["qa_id_z"] ){
-		qa_id_obj.value = cookie_ary["qa_id_z"];
-		qa_id_obj.is_new_user = 0; //新規ユーザでない
-	} else {
-		qa_id_obj.is_new_user = 1; //新規ユーザ
-	}
-
-	return qa_id_obj;
-
+	return { value: '', is_new_user: 0 };
 }
 
+// T49: qa_id_zはサーバーがSet-Cookieで発行する。JS側のCookie書き込みは不要
 qahmz.setQaid = function(){
-
-	if( !qahmz.qa_id ){
-		return false;
-	}
-	qahmz.setCookie("qa_id_z",qahmz.qa_id);
-
 	return true;
-
 }
 
-//状況に応じてCookieを更新する
-//戻り値：Cookie拒否かどうか
+// T49: Cookie管理はサーバーサイドに統一。JSはサーバー確定の同意状態(isConsented)に従う
+// #1062: 旧cookieConsentObjectガード（どこからも設定されない死に変数）を撤去。
+//        ガードが先にreturnするため後続のisConsented判定が到達不能で、
+//        同意済みユーザーのbehavioral送信が恒久にis_reject=trueになっていた
 qahmz.updateQaidCookie = function() {
 
 	if( !qahmz.cookieMode ){ //Cookie同意モード以外
-		//何もしない
 		qahmz.isRejectCookie = false;
 		return;
 	}
 
-	//同意モード
-	if( !qahmz.cookieConsentObject ){ //同意タグがなければすべてのcookie消去
-		qahmz.deleteCookie("qa_id_z");
-		qahmz.deleteCookie("qa_cookieConsent");
-		qahmz.isRejectCookie = true;
-		return;
-	}
-
-	if( qahmz.getCookie("qa_cookieConsent") == "true" ){
-		qahmz.setQaid();
+	// 同意モード: qa_cookieConsentはHttpOnlyでJSから読めないため、
+	// initレスポンスのis_consented（サーバーが$_COOKIEで判定）を正とする。
+	// 未確定（initレスポンス前）は安全側=拒否で送る。同意済みリピーターは
+	// サーバーがqa_cookieConsentを見てis_rejectをfalseに上書きするため取りこぼしなし
+	// （initは常にwithCredentials送信のため、同意Cookieは確実にサーバーへ届く）
+	if( qahmz.isConsented === true ){
 		qahmz.isRejectCookie = false;
 	}else{
-		qahmz.deleteCookie("qa_id_z");
-		qahmz.deleteCookie("qa_cookieConsent");
 		qahmz.isRejectCookie = true;
 	}
 
@@ -213,23 +196,38 @@ qahmz.init = function() {
 
 		qahmz.xhr = new XMLHttpRequest();
 
-		//qa_idの取得
-		let qa_id_obj = qahmz.getQaidfromCookie();
-
+		// T49: qa_idはPOSTに含めない（サーバーが$_COOKIEから直接読む）
 		let sendStr = 'action=init_session_data';
 		sendStr += '&tracking_hash=' + encodeURIComponent( qahmz.tracking_hash );
 		sendStr += '&url=' + encodeURIComponent( location.href );
 		sendStr += '&title=' + encodeURIComponent( document.title );
 		sendStr += '&referrer=' + encodeURIComponent( document.referrer );
 		sendStr += '&country=' + encodeURIComponent( (navigator.userLanguage||navigator.browserLanguage||navigator.language).substr(0,2) );
-		if( qa_id_obj.value != '' ){
-			sendStr += '&qa_id=' + encodeURIComponent( qa_id_obj.value );
-		}
-		sendStr += '&is_new_user=' + encodeURIComponent( qa_id_obj.is_new_user );
 		sendStr += '&tracking_id=' + encodeURIComponent( qahmz.tracking_id );
 		sendStr += '&is_reject=' + encodeURIComponent( qahmz.isRejectCookie );
 
+		// T50: original_id取得（Cookie or JS変数）
+		if ( qahmz.originalIdSourceType && qahmz.originalIdSourceName ) {
+			var oidVal = '';
+			if ( qahmz.originalIdSourceType === 'cookie' ) {
+				var cookies = qahmz.getCookieArray();
+				if ( cookies[ qahmz.originalIdSourceName ] !== undefined ) {
+					oidVal = cookies[ qahmz.originalIdSourceName ];
+				}
+			} else if ( qahmz.originalIdSourceType === 'js_var' ) {
+				var jsVal = window[ qahmz.originalIdSourceName ];
+				if ( jsVal !== undefined && jsVal !== null ) {
+					oidVal = String( jsVal );
+				}
+			}
+			if ( oidVal !== '' ) {
+				sendStr += '&original_id=' + encodeURIComponent( oidVal );
+			}
+		}
+
 		qahmz.xhr.open( 'POST', qahmz.ajaxurl, true );
+		// T49: init_session_dataのみwithCredentials（HttpOnly Cookieの送受信に必要）
+		qahmz.xhr.withCredentials = true;
 
 		qahmz.xhr.onload = function () {
 			let data;
@@ -248,7 +246,9 @@ qahmz.init = function() {
 				qahmz.readersBodyIndex = data.readers_body_index;
 				qahmz.rawName          = data.raw_name;
 				qahmz.qa_id            = data.qa_id;
-				if(!qahmz.cookieMode){ //同意モード以外なら有無を言わさずqa_idをセット
+				// T49: サーバーからの同意状態を反映
+				qahmz.isConsented      = !!data.is_consented;
+				if(!qahmz.cookieMode){
 					qahmz.setQaid();
 				}else{
 					qahmz.updateQaidCookie();
@@ -435,27 +435,35 @@ document.addEventListener("DOMContentLoaded", function() {
 );
 */
 
-qahmz.trackingStarted = false; //trackingStart関数が既に呼び出されているか？
+qahmz.trackingStarted = qahmz.trackingStarted || false; //trackingStart関数が既に呼び出されているか？（#1467: タグ二重読み込みの再パースで起動済み状態をリセットしない）
 qahmz.trackingStart = function (){
 
+	// #1467: 二重起動ガード（呼び出し元は全て trackingStarted を確認するが、レース・確認漏れへの最終防衛線）
+	if ( qahmz.trackingStarted ) {
+		return;
+	}
 	qahmz.trackingStarted = true;
 
 	let docReadyDate = new Date();
 	qahmz.speedMsec = docReadyDate.getTime() - qahmz.initDate.getTime();
 
 	// QAの初期化が完了したらmoveBehavioralDataを起動
+	// #1467: interval ID はローカル変数で所有する。共有プロパティ1本（qahmz.startMoveIntervalId）に依存すると、
+	// 多重起動時に ID が上書きされ clearInterval が最後の1本しか殺せず、迷子の見張りが送信ループを起こす。
+	let startMoveIntervalId = null;
 	qahmz.startMoveBehavioralData = function() {
 		if ( qahmz.isExcludedIp ) {
-			clearInterval( qahmz.startMoveIntervalId );
+			clearInterval( startMoveIntervalId );
 			return;
 		}
 		if ( qahmz.initBehData ) {
 			qahmz.updateMsec();
 			qahmz.moveBehavioralData();
-			clearInterval( qahmz.startMoveIntervalId );
+			clearInterval( startMoveIntervalId );
 		}
 	}
-	qahmz.startMoveIntervalId = setInterval( qahmz.startMoveBehavioralData, 10 );
+	startMoveIntervalId = setInterval( qahmz.startMoveBehavioralData, 10 );
+	qahmz.startMoveIntervalId = startMoveIntervalId; // 後方互換（本ブロック外の参照は現状なし）
 
 } 
 
@@ -465,7 +473,12 @@ document.addEventListener("DOMContentLoaded", function() {
 	}
 });
 
-if( qahmz.domloaded ){
+// #1346: qahmz.domloaded（インラインタグのリスナ）に加えて document.readyState でも判定する。
+// GTM 経由の設置ではタグ全体（インライン含む）が DOMContentLoaded 後に注入されるため、
+// インラインのリスナは発火済みで domloaded が立たない。従来この穴は dataLayer の
+// gtm.dom/gtm.load 検出（下の dataLayer ブロック）が塞いでいたが、あちらは入口の栓
+// （dli・既定 OFF）でゲートされるため、栓と無関係に readyState で開始を保証する。
+if( qahmz.domloaded || document.readyState !== 'loading' ){
 	if( !qahmz.trackingStarted ){
 		qahmz.trackingStart();
 	}
@@ -473,6 +486,11 @@ if( qahmz.domloaded ){
 
 // サイト読み込みからdocument readyが走るまでの時間を更新
 qahmz.updateMsec = function() {
+
+	// #1467: レート制限（フェイルセーフ・sendBehavioralData と共通の枠）
+	if ( ! qahmz.canSendUnderRateLimit() ) {
+		return;
+	}
 
 	let sendStr = 'action=update_msec';
 	sendStr += '&tracking_hash=' + encodeURIComponent( qahmz.tracking_hash );
@@ -555,12 +573,35 @@ qahmz.scrollY = function(){
 }
 
 // 行動データを送信
+// #1467: 行動系送信の共通レート制限（フェイルセーフ）。
+// 正常運転＝send_interval（既定3000ms＝20回/分）の定期送信＋クリック等の強制送信。クリック多用ページでも
+// 60回/分には届きにくく、事故（カミタケ実測1,200〜3,000回/分）とは20倍以上の差がある位置に天井を置く。
+// 注意: 正常負荷は QAHM_CONFIG_BEHAVIORAL_SEND_INTERVAL に暗黙依存（大幅に短縮する場合はこの天井も見直すこと）。
+// タグ二重読み込み等の異常で送信ループが生じても、サーバーを飽和させる前にクライアント側で頭打ちにする。
+qahmz.sendRateLog = qahmz.sendRateLog || [];
+qahmz.canSendUnderRateLimit = function() {
+	let nowMs = Date.now();
+	qahmz.sendRateLog = qahmz.sendRateLog.filter( function( t ) { return ( nowMs - t ) < 60000; } );
+	if ( qahmz.sendRateLog.length >= 60 ) {
+		qahmz.log( 'send rate limit exceeded. sending suppressed.' );
+		return false;
+	}
+	qahmz.sendRateLog.push( nowMs );
+	return true;
+}
+
 qahmz.sendBehavioralData = function( forceSend, isBeforeUnload ) {
 
 	// 送信回数をカウント。既にデータ送信中の場合はforceSendがtrueじゃない限りreturn
 	if ( ! forceSend && qahmz.sendBehavNum > 0 ) {
 		return;
 	}
+
+	// #1467: レート制限（フェイルセーフ）。超過時は強制送信も含めて抑止する。
+	if ( ! qahmz.canSendUnderRateLimit() ) {
+		return;
+	}
+
 	qahmz.sendBehavNum++;
 
 	let isPos   = false;
@@ -606,6 +647,9 @@ qahmz.sendBehavioralData = function( forceSend, isBeforeUnload ) {
 	// pos
 	data.append('stay_height', JSON.stringify(qahmz.stayHeight));
 	data.append('is_scroll_max', qahmz.isScrollMax);
+	// T108: PVスコープの submit 観測フラグ。pos は毎ビーコン必ず送られる（is_pos 常時 true）
+	// 経路なので、ここに載せれば raw_p ヘッダー経由で確実に PV 単位で cron に届く。
+	data.append('is_submit', qahmz.isSubmit ? 1 : 0);
 	
 	// click
 	data.append('click_ary', JSON.stringify(qahmz.clickAry));
@@ -764,21 +808,24 @@ qahmz.checkClickEvent = function(e) {
 		elementDataAttr = dataAttrs.join(',').substring(0, 200);
 	}
 	
-	let actionId = 1; // デフォルトはclick
-	const tagName = e.target.tagName.toLowerCase();
-	const type = e.target.type ? e.target.type.toLowerCase() : '';
-	
-	if (tagName === 'input' && type === 'submit') {
-		actionId = 2; // submit
-	} else if (tagName === 'a') {
-		const href = e.target.href || '';
-		if (href.startsWith('tel:')) {
-			actionId = 3; // tel
-		} else if (href.startsWith('mailto:')) {
-			actionId = 4; // mailto
-		}
-	} else if (tagName === 'button' && type === 'submit') {
-		actionId = 2; // submit
+	// action_id: クリック対象の「事実」の分類（T108）。相互排他で、より特異な事実を
+	// 優先する: tel/mailto（祖先 <a> の href スキーム）＝3/4 → form 領域内（closest('form')
+	// 非null）＝2(form) → それ以外＝1(click)。submit の推測（button/input の
+	// .type==='submit'）は廃止した——素の <button> は HTML 既定で type='submit' のため、
+	// Cookie 同意バナー等の form でないボタンが action_id=2 に混入し is_submit を汚染
+	// していた。tel/mailto は closest('a')、form は closest('form') とどちらもタグ非依存の
+	// DOM 事実で判定する——<a href="tel:"><span>電話</span></a> の span 着弾や、内側の
+	// span/icon・dev 自作ボタン（div/a/span）でも祖先要素を正しく拾う（子孫着弾で取りこぼさない）。
+	let actionId = 1; // 1:click（汎用・リンク含む・フォールバック）
+	const anchor = e.target.closest ? e.target.closest( 'a' ) : null;
+	const href   = anchor ? ( anchor.href || '' ) : '';
+
+	if ( href.startsWith( 'tel:' ) ) {
+		actionId = 3; // tel（form 内にあっても tel/mailto を優先）
+	} else if ( href.startsWith( 'mailto:' ) ) {
+		actionId = 4; // mailto
+	} else if ( e.target.closest && e.target.closest( 'form' ) ) {
+		actionId = 2; // form（フォーム領域内クリック）
 	}
 	
 	const pageXPct = document.documentElement.scrollWidth > 0
@@ -872,6 +919,15 @@ qahmz.addEventListener = function() {
 	document.querySelector("body").addEventListener("click", function(e){
 		qahmz.checkClickEvent(e);
 	});
+
+	// T108: ネイティブ submit イベントを document の capture-phase で観測し、PV単位フラグを
+	// 立てる。実フォーム送信（クリック / Enter / React <form onSubmit> 等）のみ発火するため、
+	// クリック推測で混入していた Cookie 同意バナーは自然に脱落する。preventDefault されても
+	// 発火後の観測は成立する。clickAry には積まず（PVスコープ真偽値）、ビーコンの is_submit
+	// フィールドで送る。委譲リスナーなので動的追加フォームも MutationObserver 不要で捕捉。
+	document.addEventListener("submit", function(e){
+		qahmz.isSubmit = true;
+	}, true);
 
 	qahmz.setVideoListener = function( targetElem ) {
 
@@ -1054,7 +1110,14 @@ qahmz.monitorBehavioralData = function() {
 }
 
 qahmz.moveBehavioralData = function() {
-	
+
+	// #1467: 二重初期化ガード。listener の重複登録・monitor interval の多重化・
+	// sendBehavNum リセットによる送信ゲートの再開放（送信ループの燃料）を構造的に防ぐ。
+	if ( qahmz.behavioralDataStarted ) {
+		return true;
+	}
+	qahmz.behavioralDataStarted = true;
+
 	qahmz.stayHeight    = [];
 
 	qahmz.limitMilliSec = 1000 * 60 * 30;
@@ -1063,6 +1126,11 @@ qahmz.moveBehavioralData = function() {
 
 	qahmz.isScrollMax     = false;
 	qahmz.isClickWait     = false;
+
+	// T108: このPVでネイティブ submit イベントが観測されたか（PVスコープ・action_id 非依存）。
+	// document capture-phase の submit リスナー（addEventListener 内）で立て、ビーコンの
+	// is_submit フィールドとして送る。クリック推測を廃し Enter 送信も捕捉する。
+	qahmz.isSubmit        = false;
 
 	qahmz.clickAry        = [];
 	qahmz.eventAry        = [];
@@ -1098,6 +1166,10 @@ qahmz.moveBehavioralData = function() {
 	});
 
 	// 一定間隔で動作する処理はこちらにまとめる
+	// #1467: 万一の多重起動でも monitor を増殖させない（旧 interval を止めてから張る）
+	if ( qahmz.monitorId ) {
+		clearInterval( qahmz.monitorId );
+	}
 	qahmz.monitorId = setInterval( qahmz.monitorBehavioralData, 100 );
 
 	// イベントリスナーを利用した処理はこちらにまとめる
@@ -1142,7 +1214,8 @@ try {
 	qahmz.log("beforeunload イベントの登録に失敗しました。", error);
 }
 
-if (qahmz.supportsBeforeUnloadAndSendBeacon) {
+if (qahmz.supportsBeforeUnloadAndSendBeacon && ! qahmz.unloadSendHooked) { // #1467: 二重読み込みでリスナーを重複登録しない
+	qahmz.unloadSendHooked = true;
     // beforeunload イベントでデータを送信
     window.addEventListener("beforeunload", function() {
 
@@ -1175,15 +1248,39 @@ if (qahmz.supportsBeforeUnloadAndSendBeacon) {
 //+GTMでタグのロードが遅延し、DOMContentLoadedが検出できずtrackingStart出来なかった場合の補正
 //gtm.dom or gtm.loadイベント検出時にtrackingStartしているか確認し、していなかったら開始
 
-if ( typeof window.dataLayer !== 'undefined' ) {
+// #1346: 入口の栓（フック装着ごとゲート）
+// qahmz.dli はサーバー配信の動的プレフィックス（qtag.php）が、サイト設定
+// datalayer_import が ON のときだけ定義する。未定義（既定）なら dataLayer には
+// 読み書きとも一切触らない＝push のオーバーライドが「無条件」だった既知課題の解消。
+// 従来この if 内の gtm.dom/gtm.load 検出が担っていた GTM 遅延ロード時の計測開始
+// 補正は、上の document.readyState フォールバックが dataLayer 非依存で肩代わりする。
+if ( typeof window.dataLayer !== 'undefined' && typeof qahmz.dli !== 'undefined' ) {
 
     qahmz.dLvariables = {};
 	qahmz.gtmLoadEvents   = ['gtm.dom','gtm.load'];
 
+	// #1346: event キーの無い push の記録（CTT 型＝ {page_location: 仮想URL}）。
+	// 保存するのは page_location のみ（gtm.* 等のノイズは保存しない）・イベント名は
+	// 予約名 qa_page_location・同一値の連続は二重記録しない。
+	// datalayereventpushed() は本ブロックより後で定義されるため、ここでは直接
+	// dLeventAry へ積む（記録形式は datalayereventpushed() と同一）。
+	qahmz.dlLastPageLocation = qahmz.dlLastPageLocation || null;
+	qahmz.recordDlPageLocation = qahmz.recordDlPageLocation || function ( obj ) {
+		if ( ! obj || ! Object.prototype.hasOwnProperty.call( obj, 'page_location' ) ) {
+			return;
+		}
+		if ( obj.page_location === qahmz.dlLastPageLocation ) {
+			return;
+		}
+		qahmz.dlLastPageLocation = obj.page_location;
+		qahmz.dLeventAry = qahmz.dLeventAry || [];
+		qahmz.dLeventAry.push( [ 'qa_page_location', JSON.stringify( { page_location: obj.page_location } ) ] );
+	};
+
 	//初期で=を使って変数を格納するパターンもあるので、dataLayer内のものを取り出しておく
 	for (let i = 0; i < window.dataLayer.length; i++) {
 		let obj = window.dataLayer[i];
-		
+
 		for (let key in obj) {
 			if (key !== 'event') {
 				qahmz.dLvariables[key] = obj[key];
@@ -1192,13 +1289,27 @@ if ( typeof window.dataLayer !== 'undefined' ) {
 				if (qahmz.gtmLoadEvents.includes(obj[key])){
 					if( !qahmz.trackingStarted ){
 						qahmz.trackingStart();
-					}			
+					}
 				}
 			}
 		}
+
+		// #1346: 初期走査ぶんの event 無し push を記録する（CTT の本命経路）。
+		// CTT の {page_location} は qtag より先に dataLayer に置かれるため push フックを
+		// 通らない＝ここで記録しないと1件も残らない（2026-08-03 実機検証）。
+		// dlInitScanned＝タグ二重読み込みで初期走査が再実行されても記録を繰り返さない
+		// once ガード（#1467 の gtmPushHooked と同じ動機。セルフレビュー 🟡-1）。
+		if ( ! qahmz.dlInitScanned && ! Object.prototype.hasOwnProperty.call( obj, 'event' ) ) {
+			qahmz.recordDlPageLocation( obj );
+		}
 	}
+	qahmz.dlInitScanned = true;
 
     
+	// #1467: タグ二重読み込みで push を二重フックしない（同一イベントの二重処理・多重包み込み防止）
+	if ( ! qahmz.gtmPushHooked ) {
+	qahmz.gtmPushHooked = true;
+
 	const originalDataLayerPush = window.dataLayer.push.bind(window.dataLayer);
 
     Object.defineProperty(window.dataLayer,'push', {
@@ -1240,6 +1351,11 @@ if ( typeof window.dataLayer !== 'undefined' ) {
 					} else {
 						// If it's not an event, assume it's variables and store them
 						Object.assign(qahmz.dLvariables, data);
+
+						// #1346: フック装着後に届いた event 無し push も記録する
+						// （SPA 的に後から push されるサイトへの備え。二重記録は
+						//   recordDlPageLocation 内の同一値ガードが防ぐ）
+						qahmz.recordDlPageLocation( data );
 					}
 
 				} catch (error) {
@@ -1250,6 +1366,7 @@ if ( typeof window.dataLayer !== 'undefined' ) {
 		}
 
 	);
+	} // #1467: gtmPushHooked ガード終端
 }
 
 qahmz.datalayereventpushed = function(eventname, data) {
@@ -1264,12 +1381,57 @@ qahmz.datalayereventpushed = function(eventname, data) {
 //公開メソッド
 var qahmz_pub = qahmz_pub || {};
 
+// T49: HttpOnly Cookie対応 — サーバーサイドでCookie操作
 qahmz_pub.cookieConsent = function(agree) {
+	if( !qahmz.ajaxurl ){ return; }
 	if(agree){
-		qahmz.setCookie("qa_cookieConsent",agree);
+		// 同意: サーバーにCookie発行を依頼
+		qahmz.set_cookieConsent && qahmz.set_cookieConsent();
 	}else{
-		qahmz.deleteCookie("qa_id_z");
-		qahmz.deleteCookie("qa_cookieConsent");
+		// 拒否: サーバーにCookie削除を依頼
+		var xhr = new XMLHttpRequest();
+		var sendStr = 'action=cookie_consent_revoke';
+		sendStr += '&tracking_hash=' + encodeURIComponent( qahmz.tracking_hash || '' );
+		sendStr += '&url=' + encodeURIComponent( location.href );
+		sendStr += '&tracking_id=' + encodeURIComponent( qahmz.tracking_id || '' );
+		xhr.open( 'POST', qahmz.ajaxurl, true );
+		xhr.withCredentials = true;
+		xhr.setRequestHeader( 'Content-Type', 'application/x-www-form-urlencoded' );
+		xhr.onload = function(){
+			qahmz.isConsented = false;
+			qahmz.isRejectCookie = true;
+		};
+		xhr.send( sendStr );
 	}
+}
+
+qahmz.liveView = qahmz.liveView || {};
+
+qahmz.liveView.init = function() {
+	var params = new URLSearchParams(location.search);
+	var token = params.get('qa_lv');
+
+	var storageKey = 'qa_live_view_' + location.pathname;
+	var hasStoredData = sessionStorage.getItem(storageKey) !== null;
+
+	if (!token && !hasStoredData) {
+		return;
+	}
+
+	var script = document.createElement('script');
+	script.src = qahmz.ajaxurl.replace(/qahm-ajax\.php.*$/, 'js/live-view.js') + '?ver={qtag_ver}';
+	script.onload = function() {
+		qahmz.liveView.start(token);
+	};
+	script.onerror = function() {
+		console.error('QA Live View: Failed to load live-view.js');
+	};
+	document.head.appendChild(script);
+};
+
+if (document.readyState === 'loading') {
+	document.addEventListener('DOMContentLoaded', qahmz.liveView.init);
+} else {
+	qahmz.liveView.init();
 }
 

@@ -17,6 +17,13 @@ class QAHM_Update extends QAHM_File_Data {
 		global $qahm_log;
 		global $wpdb;
 		$ver = $this->wrap_get_option( 'plugin_version' );
+
+		// T113 (#1477): 列DB 幅移行が保留中なら時間予算内で前進させる。
+		// check_version の唯一の呼び出し元は夜間 cron チェーン（Common>Check update）＝cron の
+		// flock 内で直列化済み。版数ゲート通過後も完走まで毎チェーン継続するため、
+		// 版数一致の early return より前に置く（保留なしのコストは file_exists 1回）。
+		QAHM_ColumnDB_Width_Migration::run_if_pending();
+
 		if ( $ver === QAHM_PLUGIN_VERSION ) {
 			$this->delete_maintenance_file();
 			return;
@@ -112,6 +119,111 @@ class QAHM_Update extends QAHM_File_Data {
 					return; // page_type 追加失敗時は中断、次回リトライ
 				}
 				$this->wrap_update_option( 'plugin_version', '3.0.9.0' );
+			}
+
+			if ( version_compare( '3.1.3.0', $ver, '>' ) ) {
+				// qazero-atelier ロールを既存環境へ反映する。
+				// 新規インストールは activation() で登録されるが、稼働中環境はプラグイン再有効化なしの
+				// ファイル差し替え更新では activation フックが走らないため、更新経路でも冪等に登録する。
+				$atelier_capabilities = array(
+					'read'                     => true,
+					'qazero_admin_page_access' => true,
+				);
+				// add_role() は同名ロールが既存なら何もしない（冪等）。
+				add_role( 'qazero-atelier', 'QA Atelier Admin', $atelier_capabilities );
+				$atelier_role = get_role( 'qazero-atelier' );
+				if ( $atelier_role ) {
+					// 既存ロールに不足している capability を補う（冪等）。
+					foreach ( array_keys( $atelier_capabilities ) as $atelier_cap ) {
+						if ( ! $atelier_role->has_cap( $atelier_cap ) ) {
+							$atelier_role->add_cap( $atelier_cap );
+						}
+					}
+					// 旧実装由来の過剰権限が残っていれば除去する（WP 管理画面は触らせない方針）。
+					if ( $atelier_role->has_cap( 'manage_options' ) ) {
+						$atelier_role->remove_cap( 'manage_options' );
+					}
+				}
+				$this->migrate_options_autoload();
+				$this->wrap_update_option( 'plugin_version', '3.1.3.0' );
+			}
+
+			if ( version_compare( '3.1.4.0', $ver, '>' ) ) {
+				// [#1153] 既存 sitemanage に timezone フィールドをバックフィル（subdomain_tracking/html_diff_detection_mode と同パターン）。
+				// データ契約「IANA か未設定」に従い、確定 IANA があるときだけキーを書く。手動オフセット install は未設定のまま＝実行時に WP-TZ フォールバック。
+				// #1153: 3.1.5.0 リリース（2026-07-06 版数確定）に同梱。ゲート番号 3.1.4.0 は中間段として有効（stored との比較のみに使用・リナンバー不要＝欠番方式）。
+				$sitemanage = $this->wrap_get_option( 'sitemanage' );
+				if ( $sitemanage && is_array( $sitemanage ) ) {
+					// 引数なし解決は実行中一定なのでループ外で1回だけ求める。確定 IANA が無ければループ自体を省く。
+					$store_tz = QAHM_Time::resolve_store_timezone();
+					if ( '' !== $store_tz ) {
+						foreach ( $sitemanage as &$site ) {
+							if ( ! isset( $site['timezone'] ) ) {
+								$site['timezone'] = $store_tz;
+							}
+						}
+						unset( $site );
+					}
+					$this->wrap_update_option( 'sitemanage', $sitemanage );
+				}
+				$this->wrap_update_option( 'plugin_version', '3.1.4.0' );
+			}
+
+			if ( version_compare( '3.1.5.0', $ver, '>' ) ) {
+				// [#1277/#1321] アクセス制御の capability 化（cap 名は #1321 で領域ベースへ統一）。
+				// 新規インストールは activation() で付与されるが、稼働中環境はファイル差し替え更新で
+				// activation フックが走らないため、更新経路でもアクセス領域ごとの cap を冪等付与する。
+				// WP はロール名を cap として自動付与するため、既存のロール名チェックは不変動作（後方互換）。
+				// #1277: 3.1.5.0 リリース（2026-07-06 版数確定）に同梱＝リリース版数と一致で確定。
+				$role_caps = array(
+					'qazero-view'    => array( 'qahm_analytics' ),
+					'qazero-admin'   => array( 'qahm_settings', 'qahm_analytics' ),
+					'qazero-atelier' => array( 'qahm_settings', 'qahm_analytics', 'qahm_atelier' ),
+					'administrator'  => array( 'qahm_settings', 'qahm_analytics', 'qahm_atelier' ),
+				);
+				// #1321: 旧 cap 名が付与済みの環境（未リリースの develop ビルドを踏んだ dev 等）を冪等に掃除する。
+				// 対象 = #1277 初版（qazero_manage / qazero_view / qazero_atelier_access）+ #1321 中間名
+				// （qazero_settings / qazero_analytics / qazero_atelier ＝ qahm_ 確定前の接頭辞）。
+				// 実本番では 3.1.5.0 未リリースのため通常は対象なし＝空振りで無害。
+				$obsolete_caps = array(
+					'qazero_manage',
+					'qazero_view',
+					'qazero_atelier_access',
+					'qazero_settings',
+					'qazero_analytics',
+					'qazero_atelier',
+				);
+				foreach ( $role_caps as $role_name => $caps ) {
+					$role_obj = get_role( $role_name );
+					if ( ! $role_obj ) {
+						continue;
+					}
+					foreach ( $caps as $cap ) {
+						if ( ! $role_obj->has_cap( $cap ) ) {
+							$role_obj->add_cap( $cap );
+						}
+					}
+					foreach ( $obsolete_caps as $old_cap ) {
+						if ( $role_obj->has_cap( $old_cap ) ) {
+							$role_obj->remove_cap( $old_cap );
+						}
+					}
+				}
+				// qazero-atelier は WP 管理権を持たせない方針（3.1.3.0 で実施済みだが冪等に再確認）。
+				$atelier_role = get_role( 'qazero-atelier' );
+				if ( $atelier_role && $atelier_role->has_cap( 'manage_options' ) ) {
+					$atelier_role->remove_cap( 'manage_options' );
+				}
+				$this->wrap_update_option( 'plugin_version', '3.1.5.0' );
+			}
+
+			if ( version_compare( '3.1.6.0', $ver, '>' ) ) {
+				// [T113 #1477] 列DB 辞書ID列の uint16/uint8 → uint32 拡幅に伴う既存データ一括変換を
+				// 「保留」として開始する。実変換は QAHM_ColumnDB_Width_Migration が時間予算つきバッチで
+				// 複数チェーン／複数夜にわたり実行する（本ゲートは開始マークのみ＝即時に重い処理はしない）。
+				// #1484: 3.1.6.0 リリース（2026-07-14 版数確定）に同梱＝リリース版数と一致で確定。
+				QAHM_ColumnDB_Width_Migration::mark_pending();
+				$this->wrap_update_option( 'plugin_version', '3.1.6.0' );
 			}
 		} elseif ( QAHM_TYPE === QAHM_TYPE_WP ) {
 			if ( version_compare( '1.0.5.0', $ver, '>' ) ) {
@@ -316,6 +428,42 @@ class QAHM_Update extends QAHM_File_Data {
 				}
 				$this->wrap_update_option( 'plugin_version', '5.1.9.0' );
 			}
+
+			if ( version_compare( '5.2.1.0', $ver, '>' ) ) {
+				$this->migrate_options_autoload();
+				$this->wrap_update_option( 'plugin_version', '5.2.1.0' );
+			}
+
+			if ( version_compare( '5.2.2.0', $ver, '>' ) ) {
+				// [#1153] 既存 sitemanage に timezone フィールドをバックフィル（subdomain_tracking/html_diff_detection_mode と同パターン）。
+				// データ契約「IANA か未設定」に従い、確定 IANA があるときだけキーを書く。手動オフセット install は未設定のまま＝実行時に WP-TZ フォールバック。
+				// Assistants は単一サイト＝WP-TZ なので resolve_store_timezone() は引数なし。
+				// #1153: 5.2.3.0 リリース（2026-07-14 版数確定・#1484）に同梱。ゲート番号 5.2.2.0 は中間段として有効（stored との比較のみに使用・リナンバー不要＝欠番方式）。
+				$sitemanage = $this->wrap_get_option( 'sitemanage' );
+				if ( $sitemanage && is_array( $sitemanage ) ) {
+					// 引数なし解決は実行中一定なのでループ外で1回だけ求める。確定 IANA が無ければループ自体を省く。
+					$store_tz = QAHM_Time::resolve_store_timezone();
+					if ( '' !== $store_tz ) {
+						foreach ( $sitemanage as &$site ) {
+							if ( ! isset( $site['timezone'] ) ) {
+								$site['timezone'] = $store_tz;
+							}
+						}
+						unset( $site );
+					}
+					$this->wrap_update_option( 'sitemanage', $sitemanage );
+				}
+				$this->wrap_update_option( 'plugin_version', '5.2.2.0' );
+			}
+
+			if ( version_compare( '5.2.3.0', $ver, '>' ) ) {
+				// [T113 #1477] 列DB 辞書ID列の uint16/uint8 → uint32 拡幅に伴う既存データ一括変換を
+				// 「保留」として開始する（ZERO 側 3.1.6.0 ゲートと同内容）。列DB を持たない環境では
+				// 走査対象ゼロで即 done になる＝無害。
+				// #1484: 5.2.3.0 リリース（2026-07-14 版数確定）に同梱＝リリース版数と一致で確定。
+				QAHM_ColumnDB_Width_Migration::mark_pending();
+				$this->wrap_update_option( 'plugin_version', '5.2.3.0' );
+			}
 		}
 		// Differs between ZERO and QA - End ----------
 
@@ -336,6 +484,63 @@ class QAHM_Update extends QAHM_File_Data {
 		$qahm_log->info( 'Update process has completed.' );
 	}
 
+
+	/**
+	 * qahm_ オプションの autoload を QAHM_AUTOLOAD_YES_OPTIONS 基準で一括是正する（Issue #1174）。
+	 *
+	 * 稼働中環境の wp_options 行は過去に autoload='yes' で登録されたまま残るため、
+	 * QAHM_OPTIONS の各キーを yes 群 / no 群に振り分けて autoload を設定し直す。
+	 * WP 6.4 以降は wp_set_options_autoload()、それ未満は wp_options を直接更新する。
+	 */
+	private function migrate_options_autoload() {
+		$yes_keys = array();
+		$no_keys  = array();
+		foreach ( array_keys( QAHM_OPTIONS ) as $opt ) {
+			$full_key = QAHM_OPTION_PREFIX . $opt;
+			if ( in_array( $opt, QAHM_AUTOLOAD_YES_OPTIONS, true ) ) {
+				$yes_keys[] = $full_key;
+			} else {
+				$no_keys[] = $full_key;
+			}
+		}
+
+		if ( function_exists( 'wp_set_options_autoload' ) ) {
+			// WP 6.4+
+			if ( ! empty( $yes_keys ) ) {
+				wp_set_options_autoload( $yes_keys, true );
+			}
+			if ( ! empty( $no_keys ) ) {
+				wp_set_options_autoload( $no_keys, false );
+			}
+		} else {
+			// WP 6.4 未満: wp_options を直接更新する
+			$this->migrate_autoload_direct( $yes_keys, 'yes' );
+			$this->migrate_autoload_direct( $no_keys, 'no' );
+			wp_cache_delete( 'alloptions', 'options' );
+		}
+	}
+
+	/**
+	 * wp_options.autoload を直接 UPDATE する（WP 6.4 未満のフォールバック）。
+	 *
+	 * @param array  $keys           対象の option_name（プレフィックス込み）。
+	 * @param string $autoload_value 設定する autoload 値（'yes' または 'no'）。
+	 */
+	private function migrate_autoload_direct( $keys, $autoload_value ) {
+		global $wpdb;
+		if ( empty( $keys ) ) {
+			return;
+		}
+		$placeholders = implode( ', ', array_fill( 0, count( $keys ), '%s' ) );
+		$params       = array_merge( array( $autoload_value ), $keys );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- autoload 一括是正。プレースホルダは固定の %s、値は $wpdb->prepare() で束縛。直接更新が必要でキャッシュ対象外。
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$wpdb->options} SET autoload = %s WHERE option_name IN ({$placeholders})",
+				$params
+			)
+		);
+	}
 
 	/**
 	 * メンテナンスファイルの削除

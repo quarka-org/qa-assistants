@@ -1543,6 +1543,37 @@ const SOCIAL_DOMAIN = array(
 	),
 );
 
+// #1105: 広告トラフィックで referrer 空 → source_domain='direct' の場合に
+// utm_source からドメインを補完するためのマッピング。
+// 表示・集計時にのみ使用。保存データは変更しない。
+const UTM_SOURCE_TO_DOMAIN = array(
+	'google'       => 'www.google.com',
+	'yahoo'        => 'search.yahoo.co.jp',
+	'microsoft'    => 'www.bing.com',
+	'bing'         => 'www.bing.com',
+	'line'         => 'line.me',
+	'facebook'     => 'facebook.com',
+	'fb'           => 'facebook.com',
+	'meta'         => 'facebook.com',
+	'twitter'      => 'twitter.com',
+	'x'            => 'twitter.com',
+	'instagram'    => 'instagram.com',
+	'ig'           => 'instagram.com',
+	'tiktok'       => 'www.tiktok.com',
+	// カスタム utm_source（kamitake 実データから確認済み）
+	'gdn'          => 'googleads.g.doubleclick.net',
+	'gsn'          => 'www.google.com',
+	'google_ads'   => 'www.google.com',
+	'ysa'          => 'search.yahoo.co.jp',
+	'yda'          => 'www.yahoo.co.jp',
+	'yahoo_ads'    => 'search.yahoo.co.jp',
+	'facebookad'   => 'facebook.com',
+	'instagramad'  => 'instagram.com',
+);
+
+// #1105: source_domain 補完の対象とする utm_medium
+const COMPENSABLE_MEDIA = array( 'cpc', 'ppc', 'cpm', 'paid', 'display', 'social', 'paid_social', 'social_paid' );
+
 // utm_media default id
 const UTM_MEDIUM_ID = array(
 	'ORGANIC'   => 1,

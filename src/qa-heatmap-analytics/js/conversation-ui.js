@@ -222,7 +222,7 @@ qahm.conversationUI = {
                     ? config.enableTypewriter 
                     : this.defaults.enableTypewriter;
 
-                const autoScroll = config.autoScroll !== undefined ? config.autoScroll : true;
+                // [#1265] メッセージ表示時の自動追従は撤廃済み（追従は選択肢押下後のみ: qahm-assistant-ui.js）。
 
                 if (!enableTypewriter) {
                     const messageDiv = document.createElement('div');
@@ -232,9 +232,6 @@ qahm.conversationUI = {
                     }
                     messageDiv.innerHTML = htmlString;
                     container.appendChild(messageDiv);
-                    if (autoScroll) {
-                        container.scrollTop = container.scrollHeight;
-                    }
                     
                     if (config.onMessageRendered && typeof config.onMessageRendered === 'function') {
                         try {
@@ -315,10 +312,6 @@ qahm.conversationUI = {
                         }
                         else {
                             nodeIndex++;
-                        }
-
-                        if (autoScroll) {
-                            container.scrollTop = container.scrollHeight;
                         }
 
                     } catch (error) {
@@ -434,9 +427,6 @@ qahm.conversationUI = {
                 commandBox._listeners = listeners;
 
                 container.appendChild(commandBox);
-                if (config.autoScroll === undefined || config.autoScroll) {
-                    container.scrollTop = container.scrollHeight;
-                }
 
                 if (config.onMessageRendered && typeof config.onMessageRendered === 'function') {
                     try {
@@ -665,9 +655,6 @@ qahm.conversationUI = {
 
         tableContainer.appendChild(table);
         container.appendChild(tableContainer);
-        if (config.autoScroll === undefined || config.autoScroll) {
-            container.scrollTop = container.scrollHeight;
-        }
     },
 
     /**

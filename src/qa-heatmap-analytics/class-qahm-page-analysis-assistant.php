@@ -14,6 +14,15 @@ $GLOBALS['qahm_page_analysis_assistant'] = new QAHM_Page_Analysis_Assistant();
 class QAHM_Page_Analysis_Assistant extends QAHM_File_Base {
 
 	/**
+	 * view_pv 廃止 RM1 #1387: 期間比較の PV データ取得を view_pv 行ファイル → allpv 列DB へ移行する gating。
+	 * 既定 false で従来どおり get_view_pv（view_pv 行ファイル）経路＝挙動完全不変。
+	 * true で各日を allpv 列DB（load_allpv_columns）から読む。期間内に1日でも allpv 未 done（null）なら
+	 * その期間は get_view_pv 経路へ all-or-nothing フォールバック（移行期の view_pv 併存・安全側）。
+	 * 使う列は page_id/pv/is_last/browse_sec の4つで全て allpv ネイティブ＝辞書 JOIN 不要。
+	 */
+	const RM1_PAGE_ANALYSIS_ALLPV_ENABLED = false;
+
+	/**
 	 * データ取得期間(日数)
 	 * @var int
 	 */
@@ -58,6 +67,116 @@ class QAHM_Page_Analysis_Assistant extends QAHM_File_Base {
 			__( 'Last %d days', 'qa-heatmap-analytics' ),
 			$this->data_period_days
 		);
+	}
+
+	/**
+	 * 指定期間・指定ページの PV 行を取得する（view_pv 廃止 RM1 #1387）。
+	 *
+	 * OFF（既定）＝従来どおり get_view_pv（view_pv 行ファイル）を期間で読み page_id で絞る（逐語・挙動不変）。
+	 * ON＝期間内の各暦日を allpv 列DB（load_allpv_columns）から読み、page_id 一致行を組み立てる。
+	 * ただし期間内に1日でも allpv 未 done（null）なら、その期間は OFF 経路へ all-or-nothing フォールバック
+	 * （移行期は view_pv が併存・直近日は allpv 未変換が多いため安全側に倒す）。
+	 *
+	 * 戻りは両経路とも「page_id で絞った PV 行配列（各行に page_id/pv/is_last/browse_sec を持つ）」で、
+	 * 呼び出し側の集計（pv==1 セッション数・直帰・browse_sec 合算）は経路に依らず同一に動く。
+	 *
+	 * @param string $tracking_id  トラッキングID.
+	 * @param int    $page_id      対象ページID.
+	 * @param string $start_dt     期間開始（'Y-m-d H:i:s'）.
+	 * @param string $end_dt       期間終了（'Y-m-d H:i:s'）.
+	 * @return array PV 行配列.
+	 */
+	private function get_page_period_pv_rows( $tracking_id, $page_id, $start_dt, $end_dt ) {
+		if ( self::RM1_PAGE_ANALYSIS_ALLPV_ENABLED ) {
+			$rows = $this->get_page_period_pv_rows_from_allpv( $tracking_id, $page_id, $start_dt, $end_dt );
+			if ( null !== $rows ) {
+				return $rows;
+			}
+			// allpv 未 done の日を含む期間は従来経路へフォールバック（下へ）。
+		}
+
+		global $qahm_file_functions;
+		$pv_data = $qahm_file_functions->get_view_pv( $tracking_id, $start_dt, $end_dt );
+		return $this->wrap_array_filter(
+			$pv_data,
+			function ( $pv ) use ( $page_id ) {
+				return isset( $pv['page_id'] ) && (int) $pv['page_id'] === (int) $page_id;
+			}
+		);
+	}
+
+	/**
+	 * 指定期間・指定ページの PV 行を allpv 列DB から組み立てる（view_pv 廃止 RM1 #1387・ON 経路）。
+	 *
+	 * 暦日は既存の start/end 文字列の日付部分（先頭10桁）から列挙する（gmdate/strtotime で境界を
+	 * 再計算しない＝サーバTZ と UTC のズレで OFF と暦日集合が食い違うのを防ぐ）。日の進行は UTC 一貫
+	 * （gmmktime/gmdate）で行いTZ 非依存。各日 load_allpv_columns で4列（page_id/pv/is_last/browse_sec）を
+	 * 列配列で取得し、page_id 一致行のみ行配列へ。1日でも null（未 done/ドリフト/不整合）なら全体を null。
+	 *
+	 * @param string $tracking_id  トラッキングID.
+	 * @param int    $page_id      対象ページID.
+	 * @param string $start_dt     期間開始（'Y-m-d H:i:s'）.
+	 * @param string $end_dt       期間終了（'Y-m-d H:i:s'）.
+	 * @return array|null PV 行配列。期間内に未 done 日があれば null（呼び出し側がフォールバック）.
+	 */
+	private function get_page_period_pv_rows_from_allpv( $tracking_id, $page_id, $start_dt, $end_dt ) {
+		global $qahm_db;
+		if ( ! is_object( $qahm_db ) ) {
+			return null;
+		}
+
+		$start_date = $this->wrap_substr( $start_dt, 0, 10 ); // 'Y-m-d'
+		$end_date   = $this->wrap_substr( $end_dt, 0, 10 );
+		if ( 10 !== strlen( $start_date ) || 10 !== strlen( $end_date ) ) {
+			return null;
+		}
+		$start_ymd = str_replace( '-', '', $start_date );
+		$end_ymd   = str_replace( '-', '', $end_date );
+
+		$page_id = (int) $page_id;
+		$columns = array( 'page_id', 'pv', 'is_last', 'browse_sec' );
+		$rows    = array();
+
+		$ymd       = $start_ymd;
+		$guard     = 0; // 無限ループ保険（暦日列挙の上限）。
+		while ( $ymd <= $end_ymd && $guard < 1000 ) {
+			$cols = $qahm_db->load_allpv_columns( $tracking_id, $ymd, $columns );
+			if ( null === $cols ) {
+				// Issue #1420: データ無し日（manifest done rows=0）は行0件として続行。
+				// all-or-nothing のフォールバックは「真の未 done 日」のみに純化する。フラグ OFF は常に false。
+				if ( ! $qahm_db->is_allpv_nodata_day( $tracking_id, $ymd ) ) {
+					return null; // all-or-nothing: 未 done 日があれば期間ごと従来経路へ。
+				}
+				$cols = array();
+			}
+			$page_ids = isset( $cols['page_id'] ) ? $cols['page_id'] : array();
+			$count    = $this->wrap_count( $page_ids );
+			for ( $i = 0; $i < $count; $i++ ) {
+				if ( (int) $page_ids[ $i ] === $page_id ) {
+					$rows[] = array(
+						'page_id'    => (int) $page_ids[ $i ],
+						'pv'         => isset( $cols['pv'][ $i ] ) ? (int) $cols['pv'][ $i ] : 0,
+						'is_last'    => isset( $cols['is_last'][ $i ] ) ? (int) $cols['is_last'][ $i ] : 0,
+						'browse_sec' => isset( $cols['browse_sec'][ $i ] ) ? (int) $cols['browse_sec'][ $i ] : 0,
+					);
+				}
+			}
+
+			// 翌日へ（UTC 一貫で暦日を進める＝TZ 非依存・月末/年末も正しく繰り上がる）。
+			$year  = (int) $this->wrap_substr( $ymd, 0, 4 );
+			$month = (int) $this->wrap_substr( $ymd, 4, 2 );
+			$day   = (int) $this->wrap_substr( $ymd, 6, 2 );
+			$ymd   = gmdate( 'Ymd', gmmktime( 0, 0, 0, $month, $day + 1, $year ) );
+			$guard++;
+		}
+
+		// guard で打ち切られた（期間を読み切れていない）場合は部分集計を返さず null＝フォールバックへ。
+		// 現状 data_period_days は 1〜90 にクランプされ到達しないが、将来の上限緩和に備えた安全弁。
+		if ( $ymd <= $end_ymd ) {
+			return null;
+		}
+
+		return $rows;
 	}
 
 	/**
@@ -326,29 +445,16 @@ class QAHM_Page_Analysis_Assistant extends QAHM_File_Base {
 					break;
 				}
 
-				global $qahm_file_functions;
-
 				$current_end   = gmdate( 'Y-m-d 23:59:59', strtotime( 'yesterday' ) );
 				$current_start = gmdate( 'Y-m-d 00:00:00', strtotime( '-' . $this->data_period_days . ' days', strtotime( 'yesterday' ) ) );
 
 				$previous_end   = gmdate( 'Y-m-d 23:59:59', strtotime( '-' . ( $this->data_period_days + 1 ) . ' days', strtotime( 'yesterday' ) ) );
 				$previous_start = gmdate( 'Y-m-d 00:00:00', strtotime( '-' . ( $this->data_period_days * 2 ) . ' days', strtotime( 'yesterday' ) ) );
 
-				$current_pv_data      = $qahm_file_functions->get_view_pv( $tracking_id, $current_start, $current_end );
-				$current_page_pv_data = $this->wrap_array_filter(
-					$current_pv_data,
-					function ( $pv ) use ( $page_id ) {
-						return isset( $pv['page_id'] ) && (int) $pv['page_id'] === (int) $page_id;
-					}
-				);
-
-				$previous_pv_data      = $qahm_file_functions->get_view_pv( $tracking_id, $previous_start, $previous_end );
-				$previous_page_pv_data = $this->wrap_array_filter(
-					$previous_pv_data,
-					function ( $pv ) use ( $page_id ) {
-						return isset( $pv['page_id'] ) && (int) $pv['page_id'] === (int) $page_id;
-					}
-				);
+				// view_pv 廃止 RM1 #1387: PV データ取得を gating（OFF=get_view_pv 逐語／ON=allpv 列DB・未 done 期間は OFF へフォールバック）。
+				// 戻りは従来どおり「page_id で絞った PV 行配列」ゆえ、以降の集計（pv/is_last/browse_sec）は不変。
+				$current_page_pv_data  = $this->get_page_period_pv_rows( $tracking_id, $page_id, $current_start, $current_end );
+				$previous_page_pv_data = $this->get_page_period_pv_rows( $tracking_id, $page_id, $previous_start, $previous_end );
 
 				if ( empty( $current_page_pv_data ) ) {
 					$execute[] = array(

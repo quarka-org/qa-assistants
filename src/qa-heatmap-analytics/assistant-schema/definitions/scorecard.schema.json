@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/scorecard.schema.json",
+  "title": "Scorecard definition",
+  "description": "A summary-card group shown alongside tables and charts (Issue #1409). Each card is a fixed label + a large value (+ optional unit) + an optional sub note. Values are template strings ({$var} expanded at render). Text is rendered via textContent only (no HTML) — XSS surface is zero.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cards"],
+  "properties": {
+    "title": { "type": "string", "description": "Optional heading above the cards. May be a 't:' translation reference." },
+    "cards": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "value"],
+        "properties": {
+          "label": { "type": "string", "description": "Card label. May be a 't:' translation reference." },
+          "value": { "type": "string", "minLength": 1, "description": "The big value. Template string ({$var} allowed). A non-numeric value is rendered smaller automatically (text variant)." },
+          "unit": { "type": "string", "description": "Small unit/denominator shown after the value (e.g. '/ 100', '件'). May be a 't:' translation reference." },
+          "sub": { "type": "string", "description": "Small grey note under the value. Template string ({$var} allowed)." },
+          "level": {
+            "enum": ["good", "mid", "bad", "info"],
+            "description": "Colors the value by meaning (good=green / mid=orange / bad=red / info=blue). Omit for a neutral value (no judgement — brand color is never used)."
+          }
+        }
+      }
+    }
+  }
+}

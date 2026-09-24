@@ -93,9 +93,16 @@ class QAHM_Base extends QAHM_WP_Base {
 
 	/**
 	 * WordPressのupdate_option関数をqahm用に使いやすくした関数
+	 *
+	 * $autoload を省略（null）した場合、新規登録されるオプションの autoload は
+	 * QAHM_AUTOLOAD_YES_OPTIONS に含まれるキーなら 'yes'、それ以外は 'no' になる。
+	 * 既存行の autoload は update_option では変わらない（Issue #1174 / Phase 3 で是正）。
 	 */
-	public function wrap_update_option( $option, $value ) {
-		return update_option( QAHM_OPTION_PREFIX . $option, $value );
+	public function wrap_update_option( $option, $value, $autoload = null ) {
+		if ( null === $autoload ) {
+			$autoload = in_array( $option, QAHM_AUTOLOAD_YES_OPTIONS, true );
+		}
+		return update_option( QAHM_OPTION_PREFIX . $option, $value, $autoload );
 	}
 
 	public function wrap_update_zero_option( $option, $value, $tracking_id ) {
@@ -178,36 +185,21 @@ class QAHM_Base extends QAHM_WP_Base {
 
 	/**
 	 * アクセス権限判定
+	 *
+	 * capability 判定に一本化（#1277）。引数 $cap には capability を渡す
+	 * （例: 'qahm_settings' / 'qahm_analytics' / 'qahm_atelier' / 'manage_options'）。
+	 * ロール名は判定しない。新ロール／新アドオンは cap を束ねる／足すだけで core 無改修。
+	 *
+	 * @param string $cap 判定対象の capability。
+	 * @return bool アクセス可なら true。
 	 */
 	public function check_access_role( $cap ) {
-		$user = wp_get_current_user();
-		switch ( $cap ) {
-			case 'manage_options':
-				if ( $user->has_cap( 'manage_options' ) ) {
-					return true;
-				} else {
-					return false;
-				}
-				break;
-
-			case 'qazero-admin':
-				if ( $user->has_cap( 'manage_options' ) || $user->has_cap( 'qazero-admin' ) ) {
-					return true;
-				} else {
-					return false;
-				}
-				break;
-
-			case 'qazero-view':
-				if ( $user->has_cap( 'manage_options' ) || $user->has_cap( 'qazero-admin' ) || $user->has_cap( 'qazero-view' ) ) {
-					return true;
-				} else {
-					return false;
-				}
-				break;
-			default:
-				return false;
+		// 管理者（manage_options 保持者）は QA アクセス判定を常に通す。
+		// cap 移行マイグレーション実行前でも管理者がロックアウトされない防御層。
+		if ( 'manage_options' !== $cap && current_user_can( 'manage_options' ) ) {
+			return true;
 		}
+		return current_user_can( $cap );
 	}
 
 
@@ -1243,5 +1235,51 @@ class QAHM_Base extends QAHM_WP_Base {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * #1508: utm_medium が未設定の訪問のメディアを導出する（表示・集計側の共通規則）。
+	 * get_goals_sessions（#498/#1076）の規則を全消費者（参照元/メディア表・チャネル表・各グラフ）で
+	 * 共有するための一元化。ここ以外に同じ規則を再実装しないこと（キー不一致＝ゴール紐付け欠落の再発源）。
+	 * - direct・自サイトドメイン → '(none)'
+	 * - 検索エンジン（SEARCH_ENGINES） → 'organic'
+	 * - それ以外 → 'referral'
+	 *
+	 * @param string      $source_domain source_domain（空は direct 扱い）
+	 * @param string|null $own_domain    自サイトドメイン（tracking_id='all' 等で不明なら null）
+	 * @return string '(none)' | 'organic' | 'referral'
+	 */
+	public static function derive_medium_for_empty_utm( $source_domain, $own_domain = null ) {
+		$source = $source_domain ? $source_domain : 'direct';
+		if ( 'direct' === $source || ( $own_domain && $own_domain === $source ) ) {
+			return '(none)';
+		}
+		if ( self::is_search_engine_domain( $source ) ) {
+			return 'organic';
+		}
+		return 'referral';
+	}
+
+	/**
+	 * #1105: 広告トラフィックで source_domain='direct' の場合、utm_source から表示用ドメインを解決する。
+	 * 保存データは変更せず、表示・集計時にのみ使用する。
+	 *
+	 * @param string $source_domain
+	 * @param string $utm_source
+	 * @param string $utm_medium
+	 * @return string 補完後の source_domain
+	 */
+	public static function resolve_ad_source_domain( $source_domain, $utm_source, $utm_medium ) {
+		if ( 'direct' !== $source_domain || empty( $utm_source ) || empty( $utm_medium ) ) {
+			return $source_domain;
+		}
+		if ( ! in_array( mb_strtolower( $utm_medium ), COMPENSABLE_MEDIA, true ) ) {
+			return $source_domain;
+		}
+		$source_lower = mb_strtolower( $utm_source );
+		if ( isset( UTM_SOURCE_TO_DOMAIN[ $source_lower ] ) ) {
+			return UTM_SOURCE_TO_DOMAIN[ $source_lower ];
+		}
+		return $source_domain;
 	}
 }

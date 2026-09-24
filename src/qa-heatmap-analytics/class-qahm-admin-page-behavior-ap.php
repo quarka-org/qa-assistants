@@ -160,7 +160,6 @@ class QAHM_Admin_Page_Behavior_Ap extends QAHM_Admin_Page_Behavior {
 					</div>
 				</div>
 
-				<?php $this->create_footer_follow(); ?>
 			</div>
 		</div>
 		<?php

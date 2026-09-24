@@ -10,6 +10,21 @@ $GLOBALS['qahm_view_replay'] = new QAHM_View_Replay();
 
 class QAHM_View_Replay extends QAHM_View_Base {
 
+	// OGPサムネイル取得の応答待ち秒数。リプレイ本体のHTML取得（既定60秒）とは別扱いにする。
+	// サムネイルは「出れば嬉しい」程度の飾りであり、これを待つためにPHPワーカーを長時間占有してはならない。
+	const OGP_FETCH_TIMEOUT_SEC = 5;
+
+	// 「そのページにサムネイルが無い」と確定したことを覚えておく秒数。
+	// 記録しないと、同じURLに対して画面を開くたび永久に取得を試み続ける（永久キャッシュミス）。
+	// ※ 夜間 cron が replay-view-work を2日で掃除する前提（class-qahm-cron-proc.php）。
+	//    掃除の保持日数をこの値より短くすると、記録が失効前に消えて毎回取りに行く形へ静かに戻る。
+	const OGP_MISS_TTL_SEC = 86400;
+
+	// 取得に「失敗した」ことを覚えておく秒数（タイムアウト・通信エラー等）。
+	// 失敗は一過性なので、サムネイルが無いと確定した場合と同じ長さ覚えてはいけない。
+	// 短く覚えるのは、サーバーが混んでいる間に何度も取得を試みて詰まりを助長しないため。
+	const OGP_MISS_TTL_ERROR_SEC = 600;
+
 	public function __construct() {
 		$this->regist_ajax_func( 'ajax_create_replay_file_to_raw_data' );
 		$this->regist_ajax_func( 'ajax_create_replay_file_to_data_base' );
@@ -63,7 +78,7 @@ class QAHM_View_Replay extends QAHM_View_Base {
 			return null;
 		}
 
-		$event_tsv = $this->wrap_get_contents( $path );
+		$event_tsv = $wp_filesystem->get_contents( $path );
 		$event_ary = $this->convert_tsv_to_array( $event_tsv );
 
 		// バージョンチェック
@@ -666,7 +681,10 @@ class QAHM_View_Replay extends QAHM_View_Base {
 				$info_ary['os']             = $qa_readers['UAos'];
 				$info_ary['browser']        = $qa_readers['UAbrowser'];
 				$info_ary['first_referrer'] = $first_referrer;
-				$info_ary['is_new_user']    = $pv['is_newuser'];
+				// #1568: view_pv 由来の is_newuser は文字列（'1' 等）で入るため int に正規化する。
+				// raw 経路（create_replay_file_to_raw_data）は int を書いており、型が揃わないと
+				// 表示側（replay-view.php）の厳密比較で常に「リピーター」表示になる。
+				$info_ary['is_new_user']    = (int) $pv['is_newuser'];
 				$info_ary['device']         = $dev_name;
 				$info_ary['access_time']    = $access_time;
 				$info_ary['page_array']     = $page_ary;
@@ -721,6 +739,13 @@ class QAHM_View_Replay extends QAHM_View_Base {
 	 */
 	public function ajax_get_ogp_image() {
 		try {
+			// リプレイ画面本体（replay-view.php）と同じ入場条件を要求する。
+			// この関数は「指定された URL をサーバーに取りに行かせる」ため、
+			// ログインさえしていれば誰でも叩ける状態にはしない。
+			if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+				throw new Exception( 'You do not have access privileges.' );
+			}
+
 			$url = $this->wrap_filter_input( INPUT_POST, 'url' );
 			if ( ! filter_var( $url, FILTER_VALIDATE_URL ) ) {
 				throw new Exception( 'Invalid URL' );
@@ -735,7 +760,8 @@ class QAHM_View_Replay extends QAHM_View_Base {
 			echo $this->wrap_json_encode(
 				array(
 					'success'   => true,
-					'image_url' => esc_url( $ogp_image_url ),
+					// サムネイルが無い場合は null が返る。esc_url( null ) は PHP 8.1+ で deprecation になるため文字列化する。
+					'image_url' => esc_url( (string) $ogp_image_url ),
 				)
 			);
 
@@ -762,31 +788,100 @@ class QAHM_View_Replay extends QAHM_View_Base {
 		$replay_dir_path = $this->get_data_dir_path( 'replay-view-work' );
 		$cache_file_path = $replay_dir_path . 'ogp-' . $url_hash . '.jpg';
 		$cache_file_url  = $this->get_work_dir_url() . 'ogp-' . $url_hash . '.jpg';
+		// 「見つからなかった」印。作業ディレクトリの他ファイルと同じく .php にして
+		// wrap_put_contents の 404 ガード（先頭行）を効かせる。
+		$miss_file_path  = $replay_dir_path . 'ogp-' . $url_hash . '-miss.php';
 
 		if ( $wp_filesystem->exists( $cache_file_path ) ) {
 			return $cache_file_url;
 		}
 
+		// 「取りに行かない」印。ファイルには失効時刻を書いてあるので、読む側は種別を知らなくてよい。
+		// 覚えないと、サムネイルの無いページでは画面を開くたびに毎回取得が走る。
+		// 中身が読めない・壊れている場合は 0 になり、必ず取得へ進む（＝閉じ込められない）。
+		if ( $wp_filesystem->exists( $miss_file_path ) ) {
+			$miss_until = (int) $this->wrap_get_contents( $miss_file_path );
+			if ( time() < $miss_until ) {
+				return null;
+			}
+		}
+
 		$ogp_image_url = $this->get_ogp_image( $url );
-		if ( ! $ogp_image_url ) {
+
+		// 取得に失敗した（タイムアウト・通信エラー・非200）＝一過性。短く覚えるだけにする。
+		// ここを「サムネイルが無い」と同じ長さ覚えると、サーバーが混んでいた一瞬のせいで
+		// 空いた後も長時間サムネイルが出なくなる。
+		if ( false === $ogp_image_url ) {
+			$this->write_ogp_miss( $miss_file_path, self::OGP_MISS_TTL_ERROR_SEC );
 			return null;
 		}
 
-		$response = $this->wrap_remote_get( $ogp_image_url );
+		// 取得はできたが og:image が無い＝確定的に「このページにサムネイルは無い」。
+		if ( ! $ogp_image_url ) {
+			$this->write_ogp_miss( $miss_file_path, self::OGP_MISS_TTL_SEC );
+			return null;
+		}
+
+		$response = $this->wrap_remote_get( $ogp_image_url, 'dsk', self::OGP_FETCH_TIMEOUT_SEC );
+		if ( $this->is_transient_fetch_failure( $response ) ) {
+			$this->write_ogp_miss( $miss_file_path, self::OGP_MISS_TTL_ERROR_SEC );
+			return null;
+		}
 		if ( is_wp_error( $response ) || $response['response']['code'] !== 200 ) {
+			// og:image に書かれた URL が生きていない（404 等）＝確定的。
+			$this->write_ogp_miss( $miss_file_path, self::OGP_MISS_TTL_SEC );
 			return null;
 		}
 
 		$wp_filesystem->put_contents( $cache_file_path, $response['body'] );
+		if ( $wp_filesystem->exists( $miss_file_path ) ) {
+			$this->wrap_delete( $miss_file_path );
+		}
 		return $cache_file_url;
 	}
 
 	/**
+	 * 取得の失敗が「一過性」か判定する
+	 *
+	 * 一過性＝時間をおけば直るもの（通信エラー・タイムアウト・サーバー側の一時的な不調）。
+	 * 確定的＝そのURLからは取れないもの（404 等）。両者を混ぜると、混雑した一瞬のせいで
+	 * 長時間サムネイルが出なくなる（または、消えたページを何度も取りに行き続ける）。
+	 *
+	 * @param array|\WP_Error $response wrap_remote_get() の戻り値。
+	 * @return bool 一過性なら true。
+	 */
+	private function is_transient_fetch_failure( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return true;
+		}
+		$code = (int) $response['response']['code'];
+		return ( $code >= 500 || 429 === $code );
+	}
+
+	/**
+	 * OGPサムネイルを「しばらく取りに行かない」印を書く
+	 *
+	 * @param string $miss_file_path 印のファイルパス。
+	 * @param int    $ttl_sec        何秒後まで取りに行かないか。
+	 */
+	private function write_ogp_miss( $miss_file_path, $ttl_sec ) {
+		$this->wrap_put_contents( $miss_file_path, (string) ( time() + $ttl_sec ) );
+	}
+
+	/**
 	 * OGP画像URLを取得
+	 *
+	 * @param string $url 取得対象ページのURL。
+	 * @return string|null|false 画像URL／サムネイルが取れないと確定した場合は null／一過性の失敗は false。
 	 */
 	private function get_ogp_image( $url ) {
-		$response = $this->wrap_remote_get( $url );
+		$response = $this->wrap_remote_get( $url, 'dsk', self::OGP_FETCH_TIMEOUT_SEC );
+		if ( $this->is_transient_fetch_failure( $response ) ) {
+			// 一過性の失敗と「サムネイルが無い」を呼び出し側が区別できるよう false で返す。
+			return false;
+		}
 		if ( is_wp_error( $response ) || $response['response']['code'] !== 200 ) {
+			// 404 等＝そのページ自体が無い＝サムネイルも取れないと確定している。
 			return null;
 		}
 

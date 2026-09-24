@@ -162,24 +162,43 @@
                 document.getElementById(`g${gnum}_page_goal`).style.display  = 'none';
                 document.getElementById(`g${gnum}_click_goal`).style.display = 'block';
                 document.getElementById(`g${gnum}_event_goal`).style.display = 'none';
+                document.getElementById(`g${gnum}_dlevent_goal`).style.display = 'none';
                 qahm.showIframeSelector(`g${gnum}_event-iframe-containar`);
                 //required
                 document.getElementById(`g${gnum}_goalpage`).required = false;
                 document.getElementById(`g${gnum}_clickpage`).required = true;
                 document.getElementById(`g${gnum}_clickselector`).required = true;
                 document.getElementById(`g${gnum}_eventselector`).required = false;
+                document.getElementById(`g${gnum}_dlvalues`).required = false;
                 break;
 
             case 'event':
                 document.getElementById(`g${gnum}_page_goal`).style.display  = 'none';
                 document.getElementById(`g${gnum}_click_goal`).style.display = 'none';
                 document.getElementById(`g${gnum}_event_goal`).style.display = 'block';
+                document.getElementById(`g${gnum}_dlevent_goal`).style.display = 'none';
                 jQuery( `#g${gnum}_event-iframe-containar` ).hide();
                 //required
                 document.getElementById(`g${gnum}_goalpage`).required = false;
                 document.getElementById(`g${gnum}_clickpage`).required = false;
                 document.getElementById(`g${gnum}_clickselector`).required = false;
                 document.getElementById(`g${gnum}_eventselector`).required = true;
+                document.getElementById(`g${gnum}_dlvalues`).required = false;
+                break;
+
+            // #1345: dataLayer の値でゴール判定
+            case 'dlevent':
+                document.getElementById(`g${gnum}_page_goal`).style.display  = 'none';
+                document.getElementById(`g${gnum}_click_goal`).style.display = 'none';
+                document.getElementById(`g${gnum}_event_goal`).style.display = 'none';
+                document.getElementById(`g${gnum}_dlevent_goal`).style.display = 'block';
+                jQuery( `#g${gnum}_event-iframe-containar` ).hide();
+                //required
+                document.getElementById(`g${gnum}_goalpage`).required = false;
+                document.getElementById(`g${gnum}_clickpage`).required = false;
+                document.getElementById(`g${gnum}_clickselector`).required = false;
+                document.getElementById(`g${gnum}_eventselector`).required = false;
+                document.getElementById(`g${gnum}_dlvalues`).required = true;
                 break;
 
             default:
@@ -187,12 +206,14 @@
                 document.getElementById(`g${gnum}_page_goal`).style.display  = 'block';
                 document.getElementById(`g${gnum}_click_goal`).style.display = 'none';
                 document.getElementById(`g${gnum}_event_goal`).style.display = 'none';
+                document.getElementById(`g${gnum}_dlevent_goal`).style.display = 'none';
                 jQuery( `#g${gnum}_event-iframe-containar` ).hide();
                 //required
                 document.getElementById(`g${gnum}_goalpage`).required = true;
                 document.getElementById(`g${gnum}_clickpage`).required = false;
                 document.getElementById(`g${gnum}_clickselector`).required = false;
                 document.getElementById(`g${gnum}_eventselector`).required = false;
+                document.getElementById(`g${gnum}_dlvalues`).required = false;
                 break;
 
         }
@@ -326,6 +347,9 @@
         let g_eventtype = gform[`g${gnum}_eventtype`].value;
         let g_clickselector = gform[`g${gnum}_clickselector`].value;
         let g_eventselector = gform[`g${gnum}_eventselector`].value;
+        // #1345: dataLayer ゴール（他タイプ選択時は空のまま送る）
+        let g_dlkey     = gform[`g${gnum}_dlkey`].value;
+        let g_dlvalues  = gform[`g${gnum}_dlvalues`].value;
 		let url = new URL(window.location.href);
 		let params = url.searchParams;
 		let tracking_id = params.get('tracking_id');
@@ -363,6 +387,14 @@
                 type: 'POST',
                 url: qahm.ajax_url,
                 dataType : 'json',
+                // #1060: 応答待ちの上限。これを超えたら fail 側で textStatus='timeout' として
+                // 「値が不正」ではなく「処理が長引いている」旨を案内する。
+                // 値の根拠: 開発サーバー(dev5)の設定実測では、サーバ側の上限は
+                // nginx fastcgi_read_timeout=3600s / php-fpm request_terminate_timeout=0 /
+                // pool の php_admin_value[max_execution_time]=0（php.ini の 30 を上書き）＝いずれも 120s より長い。
+                // つまり先に切れるのはブラウザ側。サーバ側では保存処理が続くため、
+                // 打ち切り時の文言は「保存された可能性がある」と案内する形にしてある。
+                timeout: 120000,
                 data: {
                     'action'  : 'qahm_ajax_save_goal_x',
                     'gid':         gnum,
@@ -376,6 +408,8 @@
                     'g_eventtype': g_eventtype,
                     'g_clickselector': g_clickselector,
                     'g_eventselector': g_eventselector,
+                    'g_dlkey':     g_dlkey,
+                    'g_dlvalues':  g_dlvalues,
                     'nonce':qahm.nonce_api,
                     'tracking_id': tracking_id
                 }
@@ -460,7 +494,16 @@
         ).fail(
             function( jqXHR, textStatus, errorThrown ){
                 qahm.log_ajax_error( jqXHR, textStatus, errorThrown );
-                alert( qahml10n['cnv_couldnt_saved'] );
+                // #1060: fail の原因を区別する。
+                //   - timeout        : jQuery 側の応答待ちが上限に達した
+                //   - error + status 0 : 応答が返る前に接続が切れた（サーバ側のタイムアウト等）
+                // どちらも「保存自体は成功している」ことが多く、「値が不正」と読める従来の文言は誤解を招く。
+                // それ以外（400/500 系・非 JSON 応答など）は従来どおりの文言のまま。
+                if ( 'timeout' === textStatus || ( 'error' === textStatus && 0 === jqXHR.status ) ) {
+                    alert( qahml10n['cnv_save_timeout'] );
+                } else {
+                    alert( qahml10n['cnv_couldnt_saved'] );
+                }
                 submitobj.value = backupvalue;
                 submitobj.disabled = false;
             }

@@ -149,6 +149,41 @@ abstract class QAHM_Core_Base {
 	}
 
 	/**
+	 * 安全な array_column() ラッパー（本体／static）
+	 *
+	 * - 配列でない値を渡すと PHP8 では TypeError になり得るため、配列以外は空配列扱いにする。
+	 *   （例：get_sitemanage() は計測サイト未登録のとき null を返す）
+	 * - $column_key に null を渡した場合は PHP 標準どおり「行そのもの」を取り出す（$index_key との併用用途）。
+	 * - ⚠️ 防御しているのは第1引数（$array）だけ。$column_key / $index_key に
+	 *   int|string|null 以外を渡した場合は PHP 標準どおり TypeError になる
+	 *   （wrap_array_filter() / wrap_array_map() が callback 側も正規化しているのとは非対称）。
+	 *
+	 * @param mixed           $array      対象配列.
+	 * @param string|int|null $column_key 取り出す列のキー（null なら行そのもの）.
+	 * @param string|int|null $index_key  戻り値のキーに使う列（省略可）.
+	 * @return array 抽出後の配列（対象が配列でない場合は空配列）.
+	 */
+	protected static function wrap_array_column_static( $array, $column_key, $index_key = null ) {
+		if ( ! is_array( $array ) ) {
+			return array();
+		}
+
+		return array_column( $array, $column_key, $index_key );
+	}
+
+	/**
+	 * 安全な array_column() ラッパー（インスタンス用）
+	 *
+	 * @param mixed           $array      対象配列.
+	 * @param string|int|null $column_key 取り出す列のキー（null なら行そのもの）.
+	 * @param string|int|null $index_key  戻り値のキーに使う列（省略可）.
+	 * @return array
+	 */
+	protected function wrap_array_column( $array, $column_key, $index_key = null ) {
+		return static::wrap_array_column_static( $array, $column_key, $index_key );
+	}
+
+	/**
 	 * 安全な array_merge() ラッパー（本体／static）
 	 *
 	 * @param array ...$arrays マージする配列.

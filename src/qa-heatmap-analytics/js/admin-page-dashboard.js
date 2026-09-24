@@ -27,6 +27,7 @@ window.addEventListener('DOMContentLoaded', function() {
 jQuery(
 	function() {
         //days access
+        qahm.EChart.loading( 'access_graph' ); // データ取得中の表情（#1294。create が自動で消す）
         jQuery.ajax(
             {
                 type: 'POST',
@@ -50,6 +51,7 @@ jQuery(
         ).fail(
             function( jqXHR, textStatus, errorThrown ){
                 qahm.log_ajax_error( jqXHR, textStatus, errorThrown );
+                qahm.EChart.loading( 'access_graph', false );
                 qahm.dashParamDeferred.reject();
             }
         );
@@ -80,16 +82,7 @@ jQuery(
 				startidx = 0;
 			}
 
-			let goalDaySession = 0;
-			let goalday = '';
-			if ( qahm.siteinfoJson ) {
-				let siteinfoObj = JSON.parse( qahm.siteinfoJson );
-				goalDaySession = siteinfoObj['goaldaysession'];
-				goalday = siteinfoObj['goalday'];
-			}
-
 			let dashcharts_data  = new Array();
-			let goalcharts_data  = new Array();
 			let dashcharts_label = new Array();
 			let this_mn_sessions = 0;
 			let last_mn_sessions = 0;
@@ -101,9 +94,6 @@ jQuery(
 				}
 				dashcharts_label[iii - startidx] = dashary[iii]['date'].slice(5).replace('-', '/');
 				dashcharts_data[iii - startidx]  = dashary[iii]['session_count'];
-				if ( 0 < goalDaySession ) {
-					goalcharts_data[iii - startidx] = goalDaySession;
-				}
 			}
 			let ary_lastd_o      = dateStringSlicer( ary_lastday );
 			let ary_lastday_len  = ary_lastd_o['D'];
@@ -119,58 +109,21 @@ jQuery(
 			document.getElementById('this-month-sessions').innerText = qahm.comma( this_mn_sessions );
 			document.getElementById('this-month-estimate').innerText = qahm.comma( this_mn_estimate );
 
-			let cvAccessGraph = document.getElementById('access_graph');
-			let datasets = {
-					type: 'line',
-					label: qahml10n['graph_sessions'],
-					fill: false,
-					lineTension: 0,
-					data: dashcharts_data,
-					borderColor: '#69A4E2',
-					borderJoinStyle: 'bevel',
-					pointStyle: 'rect',
-					pointRadius: 1.5,
-					borderWidth: 2.5,
-					pointBackgroundColor: '#69A4E2',
-				};
-			datasets = [datasets];
-
-			let cvAccessGraphChart = new Chart(cvAccessGraph, {
-				type: 'line',
-				data: {
+			// アクセス推移（#1280: qahm.EChart ラッパ経由）
+			let accessMax = dashcharts_data.length ? Math.max.apply( null, dashcharts_data ) : 0;
+			qahm.EChart.create( 'access_graph', {
+				kind: 'line',
 				labels: dashcharts_label,
-				datasets: datasets,
-				},
-				options: {
-					legend: {
-						labels: {
-							fontSize: 9
-						},
-					},
-					scales: {
-						yAxes: [{
-							ticks: {
-								min: 0,
-							},
-							beforeBuildTicks: function(axis) {
-								if( axis.max < 6 ) {
-									axis.max = 6;
-									axis.options.ticks.stepSize = 1;
-								}
-							},
-						}],
-						xAxes: [{
-							// 日付ラベルの設定
-							ticks: {
-								autoSkip: true,
-								maxRotation: 0,
-								minRotation: 0,
-								maxTicksLimit: 10
-							}
-						}],
-					},
-				},
-			});
+				series: [ {
+					name: qahml10n['graph_sessions'],
+					data: dashcharts_data,
+					color: '#69A4E2'
+				} ],
+				legend: true,
+				maxXTicks: 10,
+				// 現行 beforeBuildTicks 踏襲: 最大値が小さいときは目盛り上限 6・刻み 1 を確保
+				yAxes: accessMax < 6 ? [ { max: 6, interval: 1 } ] : undefined
+			} );
 		});
 
 
@@ -178,6 +131,7 @@ jQuery(
         if ( qahm.goalsJson ) {
             qahm.goalsArray = JSON.parse( qahm.goalsJson );
 
+            qahm.EChart.loading( 'conversion_graph' ); // データ取得中の表情（#1294。create が自動で消す）
             jQuery.ajax(
                 {
                     type: 'POST',
@@ -190,6 +144,8 @@ jQuery(
                 }
             ).done(
                 function( data ){
+                    // データ無し・ゴール未設定でグラフ未生成のままでもオーバーレイが残らないよう先に消す
+                    qahm.EChart.loading( 'conversion_graph', false );
                     if ( data ) {
                         qahm.g2monSessionsJson = data['g_session_ary'];
                         document.getElementById('this-month-goal-cv').textContent = data['g_nmon_cv'];
@@ -230,44 +186,18 @@ jQuery(
                                 nextdayobj.setDate( nextdayobj.getDate() + 1 );
                             }
             
-                            //goals graph
-                            let cvConversionGraph = document.getElementById('conversion_graph');
-                            let conv_charts_data = datedata;
-                            let cvConversionGraphChart = new Chart(cvConversionGraph, {
-                                type: 'bar',
-                                data: {
-                                    labels: datelabel,
-                                    datasets: [{
-                                        label: 'Conversions',
-                                        fill: false,
-                                        lineTension: 0,
-                                        data: conv_charts_data,
-                                        borderColor: qahm.graphColorGoals[0],
-                                        borderJoinStyle: 'bevel',
-                                        pointStyle: 'rect',
-                                        pointRadius: 1.5,
-                                        borderWidth: 2.5,
-                                        pointBackgroundColor: qahm.graphColorGoals[0],
-                                    }],
-                                },
-                                options: {
-                                    legend: {
-                                        labels: {
-                                            fontSize: 9
-                                        },
-                                    },
-									scales: {
-										xAxes: [{
-											ticks: {
-												autoSkip: true,
-												maxRotation: 0,
-												minRotation: 0,
-												maxTicksLimit: 10
-											}
-										}]
-									},
-                                },
-                            });
+                            //goals graph（#1280: qahm.EChart ラッパ経由）
+                            qahm.EChart.create( 'conversion_graph', {
+                                kind: 'bar',
+                                labels: datelabel,
+                                series: [ {
+                                    name: 'Conversions',
+                                    data: datedata,
+                                    color: qahm.graphColorGoals[0]
+                                } ],
+                                legend: true,
+                                maxXTicks: 10
+                            } );
                         }
 
                     }
@@ -275,6 +205,7 @@ jQuery(
             ).fail(
                 function( jqXHR, textStatus, errorThrown ){
                     qahm.log_ajax_error( jqXHR, textStatus, errorThrown );
+                    qahm.EChart.loading( 'conversion_graph', false );
                 }
             );
 

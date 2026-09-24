@@ -61,14 +61,41 @@ class QAHM_Activate extends QAHM_File_Base {
 		}
 
 		// Specific to ZERO - Start ---------------
-		// 権限の追加
+		// 権限の追加（#1277: アクセス領域ごとの capability。ロールは cap の束）
 		if ( QAHM_TYPE === QAHM_TYPE_ZERO ) {
-			$capabilities = array(
+			// 全 QA ロール共通の土台。'qazero_admin_page_access' は旧・未参照 cap だが
+			// 後方互換のため残置（新 cap = qahm_analytics / qahm_settings / qahm_atelier）。
+			$base = array(
 				'read'                     => true, // WordPress のデフォルト権限、ダッシュボードへのアクセスを許可
-				'qazero_admin_page_access' => true, // カスタム権限
+				'qazero_admin_page_access' => true, // 旧カスタム権限（互換のため残置・未使用）
 			);
-			add_role( 'qazero-admin', 'QA Zero Admin', $capabilities );
-			add_role( 'qazero-view', 'QA Zero View', $capabilities );
+
+			// qazero-view: 閲覧のみ
+			$view_caps                = $base;
+			$view_caps['qahm_analytics'] = true;
+			add_role( 'qazero-view', 'QA Zero View', $view_caps );
+
+			// qazero-admin: 管理操作 + 閲覧
+			$admin_caps                  = $view_caps;
+			$admin_caps['qahm_settings'] = true;
+			add_role( 'qazero-admin', 'QA Zero Admin', $admin_caps );
+
+			// qazero-atelier: QA 最上位（管理 + 閲覧 + アトリエ）。
+			// #1277: WP 管理権（manage_options）は持たせない（サイト設定まで触れる準管理者化を避ける）。
+			$atelier_caps                          = $admin_caps;
+			$atelier_caps['qahm_atelier'] = true;
+			add_role( 'qazero-atelier', 'QA Atelier Admin', $atelier_caps );
+
+			// administrator にも QA 3 cap を付与（WooCommerce の manage_woocommerce と同様、
+			// current_user_can( 'qahm_*' ) が administrator でも真になるように）。
+			$administrator = get_role( 'administrator' );
+			if ( $administrator ) {
+				foreach ( array( 'qahm_settings', 'qahm_analytics', 'qahm_atelier' ) as $admin_cap ) {
+					if ( ! $administrator->has_cap( $admin_cap ) ) {
+						$administrator->add_cap( $admin_cap );
+					}
+				}
+			}
 		}
 		// Specific to ZERO - End -----------------
 
@@ -94,6 +121,8 @@ class QAHM_Activate extends QAHM_File_Base {
 		if ( QAHM_TYPE === QAHM_TYPE_ZERO ) {
 			remove_role( 'qazero-admin' );
 			remove_role( 'qazero-view' );
+			// T100b-c: 追加した QA アトリエ用ロールも対称に削除する。
+			remove_role( 'qazero-atelier' );
 		}
 		// Specific to ZERO - End -----------------
 	}
@@ -177,24 +206,27 @@ class QAHM_Activate extends QAHM_File_Base {
 					if ( $parse_url && isset( $parse_url['host'] ) ) {
 						$domain_url  = $parse_url['host'] . ( isset( $parse_url['path'] ) ? $parse_url['path'] : '/' );
 						$tracking_id = substr( md5( uniqid( wp_rand(), true ) ), 0, 16 );
-						$sitemanage  = array(
-							array(
-								'site_id'                => 0,
-								'url'                    => $domain_url,
-								'domain'                 => $parse_url['host'],
-								'tracking_id'            => $tracking_id,
-								'memo'                   => '',
-								'status'                 => 0,
-								'ignore_params'          => '',
-								'search_params'          => '',
-								'ignore_ips'             => '',
-								'url_case_sensitivity'   => 0,
-								'get_base_html_periodic' => 0,
-								'anontrack'              => 1,
-								'insert_datetime'        => current_time( 'mysql' ),
-							),
+						$new_site = array(
+							'site_id'                => 0,
+							'url'                    => $domain_url,
+							'domain'                 => $parse_url['host'],
+							'tracking_id'            => $tracking_id,
+							'memo'                   => '',
+							'status'                 => 0,
+							'ignore_params'          => '',
+							'search_params'          => '',
+							'ignore_ips'             => '',
+							'url_case_sensitivity'   => 0,
+							'get_base_html_periodic' => 0,
+							'anontrack'              => 1,
+							'insert_datetime'        => current_time( 'mysql' ),
 						);
-						$this->wrap_update_option( 'sitemanage', $sitemanage );
+						// timezone はデータ契約「IANA か未設定」に従い、確定 IANA があるときだけキーを書く（自WPサイト＝WP-TZ）
+						$store_tz = QAHM_Time::resolve_store_timezone();
+						if ( '' !== $store_tz ) {
+							$new_site['timezone'] = $store_tz;
+						}
+						$this->wrap_update_option( 'sitemanage', array( $new_site ) );
 					}
 				}
 			}

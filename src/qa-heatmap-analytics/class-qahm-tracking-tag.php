@@ -78,6 +78,13 @@ class QAHM_Tracking_Tag extends QAHM_File_Base {
 			if ( ! $qa_tag_url ) {
 				return;
 			}
+			// ver は per-tid qtag.js の filemtime（=中身が変わった時だけ URL が変わる）。ファイル不在時は版数へフォールバック
+			$qa_tag_ver  = ( defined( 'QAHM_PLUGIN_VERSION' ) && QAHM_PLUGIN_VERSION ) ? QAHM_PLUGIN_VERSION : '0.0.0';
+			$qa_tag_file = $this->get_qtag_dir_path( $tracking_id, false ) . 'qtag.js';
+			if ( file_exists( $qa_tag_file ) ) {
+				$qa_tag_ver = (string) filemtime( $qa_tag_file );
+			}
+			$qa_tag_url = $qa_tag_url . '?ver=' . rawurlencode( $qa_tag_ver );
 
 			// qtag.jsで使用する変数を準備
 			$debug_mode = false;

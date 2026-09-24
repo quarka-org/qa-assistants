@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/scenes.schema.json",
+  "title": "Scenes",
+  "description": "Map of scene name to a scene (array of steps). A 'start' scene is required (execution entry point).",
+  "type": "object",
+  "minProperties": 1,
+  "required": ["start"],
+  "patternProperties": { "^[a-z][a-z0-9_]*$": { "$ref": "scene.schema.json" } },
+  "additionalProperties": false
+}

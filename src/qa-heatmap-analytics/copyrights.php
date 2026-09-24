@@ -25,9 +25,19 @@ Copyright (c) 2020 ma_suwa, kanaparty, Nick Steele
 License: MIT License, https://opensource.org/licenses/mit-license.php
 Source: https://codepen.io/
 
-Chart.js
-License: MIT License, https://opensource.org/licenses/mit-license.php
-Source: https://github.com/chartjs/Chart.js
+Apache ECharts
+License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
+Source: https://github.com/apache/echarts
+
+ZRender (bundled with Apache ECharts)
+Copyright (c) 2017 Baidu Inc.
+License: BSD 3-Clause License, https://opensource.org/licenses/BSD-3-Clause
+Source: https://github.com/ecomfe/zrender
+
+tslib (bundled with Apache ECharts)
+Copyright (c) Microsoft Corporation.
+License: 0BSD, https://github.com/microsoft/tslib/blob/main/LICENSE.txt
+Source: https://github.com/microsoft/tslib
 
 Moment-with-locales.js
 License: MIT License, https://opensource.org/licenses/mit-license.php

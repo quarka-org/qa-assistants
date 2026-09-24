@@ -1,0 +1,391 @@
+# make-pot で抽出できない翻訳エントリの退避ファイル（日本語）。
+#
+# これは WordPress が読み込むファイルではない。qa-heatmap-analytics-ja.po を
+# wp i18n update-po で更新したあと、このファイルのエントリを手で戻すために置いている。
+#
+# なぜ必要か:
+#   update-po は POT に無いエントリを（gettext の msgmerge と違い）#~ でコメントアウトせず
+#   完全に削除する。以下の2種類はコードに必要だが POT に現れないため、放置すると訳が消える。
+#
+#   1. 動的引数の __()
+#      例: class-qahm-page-type-detector.php の KEYWORD_DEFS を回して __( $key, ... ) する箇所。
+#          'Add to cart' / 'About us' / 'Privacy policy' など。静的解析では拾えない。
+#   2. QA Assistants 側にのみ存在する文字列
+#      languages/ は src/core/ にあり両プロダクトに同梱されるため、QA ZERO のビルドから
+#      抽出すると QA Assistants 専用の文字列が消える。
+#
+# 運用:
+#   update-po の実行後、このファイルのエントリを qa-heatmap-analytics-ja.po の末尾に戻す。
+#   戻したあとで重複 msgid が出ないことを確認すること。
+#   コードから本当に消えた文字列に気づいたら、このファイルからも削除する。
+msgid ""
+msgstr ""
+"Project-Id-Version: QA Assistants / QA ZERO (shared core)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: ja_JP\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: js/lib/qa-table/qa-table.js:747
+msgid "Applied filters:"
+msgstr "適用中の絞り込み:"
+
+#: js/lib/qa-table/qa-table.js:740
+msgid "No filters applied"
+msgstr "絞り込みなし"
+
+#: js/lib/qa-table/qa-table.js:615
+msgid "Filters"
+msgstr "絞り込み"
+
+#: class-qahm-page-analysis-assistant.php:727 heatmap-view.php:228
+#: replay-view.php:203
+msgid "Mobile"
+msgstr "モバイル"
+
+#: class-qahm-page-analysis-assistant.php:725 heatmap-view.php:222
+#: replay-view.php:206
+msgid "Desktop"
+msgstr "デスクトップ"
+
+#: class-qahm-data-api.php:4381 class-qahm-data-api.php:4582
+#: class-qahm-data-api.php:4609 class-qahm-data-api.php:4661
+#: class-qahm-data-api.php:4693
+msgid "An error occurred while processing your request."
+msgstr "リクエストの処理中にエラーが発生しました。"
+
+#: class-qahm-cron-proc.php:785
+msgid "For more information, please refer to the documentation below."
+msgstr "詳しくは、以下のドキュメントをご覧ください。"
+
+#: class-qahm-cron-proc.php:783
+msgid "You can check the current status on the Audience page:"
+msgstr "現在の状況は「訪問レポート」画面で確認できます:"
+
+#: class-qahm-cron-proc.php:782
+msgid ""
+"Once the monthly limit is fully reached, data collection will be paused "
+"until the beginning of the next month."
+msgstr "月間上限に達すると、データ収集は翌月初めまで一時停止されます。"
+
+#. translators: 1: plugin name, 2: site name
+#: class-qahm-cron-proc.php:778
+msgid ""
+"The pageview count for %1$s on your site, %2$s, has reached 80%% of the "
+"monthly limit."
+msgstr "サイト「%2$s」でご利用中の %1$s のページビュー数が、月間上限の 80%% に達しました。"
+
+#. translators: 1: plugin name
+#: class-qahm-cron-proc.php:773
+msgid "Pageview Limit 80%% Reached on %s"
+msgstr "%s のページビュー上限の 80%% に達しました"
+
+#: class-qahm-cron-proc.php:699
+msgid ""
+"If this limit feels too restrictive for your site, you can find more "
+"information in our documentation."
+msgstr "上限がサイトの規模に合わない場合は、ドキュメントに詳しい情報があります。"
+
+#: class-qahm-cron-proc.php:697
+msgid "You can confirm the current status on the Audience page:"
+msgstr "現在の状況は「訪問レポート」画面で確認できます:"
+
+#: class-qahm-cron-proc.php:696
+msgid ""
+"As a result, data collection has been temporarily paused until the beginning"
+" of the next month."
+msgstr "その結果、データ収集は翌月初めまで一時的に停止されています。"
+
+#. translators: 1: plugin name
+#: class-qahm-cron-proc.php:687
+msgid "Pageview Limit Reached on %s"
+msgstr "%s のページビュー上限に達しました"
+
+#: class-qahm-admin-page-realtime.php:121
+msgid "Recent Sessions (Replayable)"
+msgstr "直近のセッション"
+
+#: class-qahm-admin-page-help.php:70
+msgid "Site and Environment Info"
+msgstr "環境情報"
+
+#: class-qahm-admin-page-dataviewer.php:147
+msgid "Back to Assistant Selection"
+msgstr "AIアシスタント選択に戻る"
+
+#: class-qahm-admin-page-config.php:531
+msgid ""
+"You can update your goals at any time. This will not affect the collected "
+"data."
+msgstr "目標はいつでも更新できます。更新しても、これまでに収集されたデータには影響しません。"
+
+#: class-qahm-admin-page-config.php:529
+msgid ""
+"they will appear across various reports, including the detailed “Goals” "
+"report."
+msgstr "詳細な「Goals」レポートを含む、さまざまなレポートに表示されます。"
+
+#: class-qahm-admin-page-config.php:529
+msgid ""
+"Basic goal metrics appear in Audience. For the full Goals report, enable "
+"Advanced Mode."
+msgstr ""
+"基本的な目標指標は「訪問レポート」に表示されます。\n"
+"「目標」 の詳細レポートを確認するには、アドバンスドモードを有効にしてください。"
+
+#: class-qahm-admin-page-config.php:527
+msgid "Goals help you monitor your website’s success."
+msgstr "目標を設定することで、サイトの成果を把握・確認しやすくなります。"
+
+#: class-qahm-admin-page-config.php:318
+msgid "Save Goal"
+msgstr "目標を保存"
+
+#. translators: placeholders are for the link
+#: class-qahm-admin-init.php:119
+msgid "Notice: Your site has used 80% of its monthly pageview limit."
+msgstr "お知らせ: 月間ページビュー上限の 80% を使用しました。"
+
+#. Description of the plugin
+#: qahm.php
+msgid ""
+"Discover insights with QA Assistants — your platform for data-driven "
+"assistants that analyze sites from different angles."
+msgstr "QA Assistants で改善のヒントを見つけましょう。さまざまな角度からサイトを分析する、データ駆動型アシスタントのプラットフォームです。"
+
+#. Plugin Name of the plugin
+#: qahm.php
+msgid "QA Assistants"
+msgstr "QA Assistants"
+
+#: replay-view.php:259
+msgid "Either of three types: desktop, mobile, tablet."
+msgstr "デスクトップ、モバイル、タブレットの3つのうちのいずれかです。"
+
+#: class-qahm-page-analysis-assistant.php:726 heatmap-view.php:225
+#: replay-view.php:200
+msgid "Tablet"
+msgstr "タブレット"
+
+#. translators: 1: plugin name, 2: site name
+#: class-qahm-cron-proc.php:692
+msgid ""
+"This is to inform you that the pageview capacity limit for %1$s on your "
+"site, %2$s, has been reached."
+msgstr "サイト「%2$s」でご利用中の %1$s のページビュー上限に達しましたのでお知らせします。"
+
+#: class-qahm-admin-page-license.php:61
+msgid "Your license is now active and authenticated."
+msgstr "ライセンス認証に成功しました。"
+
+#: class-qahm-admin-page-license.php:60
+msgid "Success!"
+msgstr "成功"
+
+# Legacy fallback for assistant-plugins/legacy/* (msgctxt なし、source_domain
+# の意味維持)
+msgid "Source"
+msgstr "参照元"
+
+# Legacy fallback for assistant-plugins/legacy/*
+msgid "Medium"
+msgstr "メディア"
+
+# Legacy fallback for assistant-plugins/legacy/*
+msgid "Campaign"
+msgstr "キャンペーン"
+
+#: class-qahm-admin-page-realtime.php:96
+msgid "Active Users in Last Min"
+msgstr "この1分間のアクティブユーザー数"
+
+#: class-qahm-admin-page-realtime.php:90
+msgid "Users in Last 30 Min"
+msgstr "直近30分間のユーザー数"
+
+#: class-qahm-admin-page-help.php:94
+msgid "240 seconds recommended"
+msgstr "推奨 240秒"
+
+#: class-qahm-admin-page-help.php:93
+msgid "PHP max execution time"
+msgstr "PHP タイムリミット"
+
+#: class-qahm-admin-page-help.php:90
+msgid "1G+(1024M+) recommended"
+msgstr "推奨 1G（1024M）以上"
+
+#. translators: placeholders represent the supported version number
+#: class-qahm-admin-page-help.php:82 class-qahm-admin-page-help.php:86
+msgid "%s or higher"
+msgstr "%s 以上"
+
+#: class-qahm-admin-page-help.php:76
+msgid "QA Supported Environment"
+msgstr "QAがサポートしている環境"
+
+#: class-qahm-admin-page-help.php:76
+msgid "Your Site"
+msgstr "このサイト"
+
+#: class-qahm-admin-page-help.php
+msgid "プラグインと環境情報"
+msgstr "プラグインと環境情報"
+
+#: class-qahm-admin-page-help.php
+msgid "バージョン"
+msgstr "バージョン"
+
+#: class-qahm-admin-page-help.php
+msgid "今月のPV数 / 上限PV数"
+msgstr "今月のPV数 / 上限PV数"
+
+#: class-qahm-admin-page-help.php
+msgid "保存データ量"
+msgstr "保存データ量"
+
+#: class-qahm-admin-page-help.php
+msgid "ファイル数"
+msgstr "ファイル数"
+
+#: class-qahm-admin-page-help.php
+msgid "QAのページ表示速度"
+msgstr "QAのページ表示速度"
+
+#: class-qahm-admin-page-config.php:878
+msgid ""
+"Authentication is complete and the token has been obtained. If the "
+"integration isn't working properly, please click the \"Authenticate\" button"
+" again to re-authenticate."
+msgstr "認証完了しトークンを取得しました。うまくいっていないような場合は再度「認証する」ボタンを押して再認証してください。"
+
+#: class-qahm-admin-page-config.php:815
+msgid "Connect with Google API"
+msgstr "Google API と連携する"
+
+#: class-qahm-admin-page-config.php:376
+msgid "Connected with Google API successfully."
+msgstr "Google APIの連携に成功しました。"
+
+#: class-qahm-admin-page-config.php:474
+msgid "Save Changes"
+msgstr "変更を保存"
+
+#: class-qahm-admin-page-help.php:71
+msgid "Installed Version"
+msgstr "現在のバージョン"
+
+#. Plugin URI of the plugin
+#. Author URI of the plugin
+#: qahm.php
+msgid "https://quarka.org/"
+msgstr "https://quarka.org/"
+
+#. Issue #901 Step 3 — Measurement tab labels (Japanese source strings)
+#: class-qahm-admin-page-config.php:945
+msgid "自由メモ"
+msgstr ""
+
+#: qa-zero/class-qahm-admin-page-entire.php:203
+msgid "ユーザータイプ（新規／リピート）の判別方法"
+msgstr ""
+
+#. Issue #901 Step 5 — Terminology fix (Entire page)
+#: qa-zero/class-qahm-admin-page-entire.php:197
+msgid "サブドメイン間でユーザーを共有"
+msgstr ""
+
+#. --- Page Type Detector: article_date ---
+#: class-qahm-page-type-detector.php
+msgid "Posted date"
+msgstr "投稿日"
+
+#: class-qahm-page-type-detector.php
+msgid "Published date"
+msgstr "公開日"
+
+#. --- Page Type Detector: add_to_cart ---
+#: class-qahm-page-type-detector.php
+msgid "Add to cart"
+msgstr "カートに入れる"
+
+#. --- Page Type Detector: thanks_phrase ---
+#: class-qahm-page-type-detector.php
+msgid "Thank you for your"
+msgstr "ありがとうございました"
+
+#: class-qahm-page-type-detector.php
+msgid "Thank you for"
+msgstr "ありがとうございました"
+
+#. --- Page Type Detector: list_title ---
+#: class-qahm-page-type-detector.php
+msgid "List"
+msgstr "一覧"
+
+#: class-qahm-page-type-detector.php
+msgid "Category"
+msgstr "カテゴリ"
+
+#. --- Page Type Detector: trust_info_title ---
+#: class-qahm-page-type-detector.php
+msgid "About us"
+msgstr "会社概要"
+
+#: class-qahm-page-type-detector.php
+msgid "Privacy policy"
+msgstr "プライバシーポリシー"
+
+#: class-qahm-page-type-detector.php
+msgid "Terms of service"
+msgstr "利用規約"
+
+#. --- Page Type Detector: faq_title ---
+#: class-qahm-page-type-detector.php
+msgid "Frequently asked questions"
+msgstr "よくある質問"
+
+#. --- Page Type Detector: faq_title (polite form) ---
+#: class-qahm-page-type-detector.php
+msgid "Frequently asked questions (polite)"
+msgstr "よくあるご質問"
+
+#. --- Page Type Detector: account_title ---
+#: class-qahm-page-type-detector.php
+msgid "My page"
+msgstr "マイページ"
+
+#: class-qahm-page-type-detector.php
+msgid "My account"
+msgstr "マイアカウント"
+
+#. --- Page Type Detector: checkout_title ---
+#: class-qahm-page-type-detector.php
+msgid "Payment"
+msgstr "決済"
+
+#: class-qahm-page-type-detector.php
+msgid "Checkout"
+msgstr "お支払い"
+
+#. --- Page Type Detector: confirm_title ---
+#: class-qahm-page-type-detector.php
+msgid "Confirmation"
+msgstr "確認"
+
+#: class-qahm-page-type-detector.php
+msgid "Confirm"
+msgstr "確認"
+
+#: class-qahm-qal-material.php:1548
+msgid "Invalid column reference in join \"on\" condition."
+msgstr "join \"on\" 条件内のカラム参照が不正です。"
+
+#: class-qahm-qal-wp-material.php:110
+msgid "Column 'wp_posts.%1$s' is not defined for wp_posts. Allowed: %2$s"
+msgstr "カラム 'wp_posts.%1$s' は wp_posts に定義されていません。利用可能: %2$s"
+
+#: class-qahm-qal-wp-material.php:77
+msgid "Material '%s' is not supported by WP Material handler."
+msgstr "マテリアル '%s' は WP Material ハンドラでサポートされていません。"

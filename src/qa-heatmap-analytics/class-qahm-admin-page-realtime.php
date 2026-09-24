@@ -48,12 +48,15 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 			wp_enqueue_style( QAHM_NAME . '-admin-page-realtime', $css_dir_url . 'admin-page-realtime-wp.css', null, QAHM_PLUGIN_VERSION );
 		}
 
-		wp_enqueue_script( QAHM_NAME . '-admin-page-realtime', $js_dir_url . 'admin-page-realtime.js', array( QAHM_NAME . '-effect' ), QAHM_PLUGIN_VERSION );
-		wp_enqueue_script( QAHM_NAME . '-chart', $js_dir_url . 'lib/chart/chart.min.js', null, QAHM_PLUGIN_VERSION, false );
+		wp_enqueue_style( QAHM_NAME . '-echarts-wrapper', $css_dir_url . 'qahm-echarts.css', null, QAHM_PLUGIN_VERSION );
+
+		wp_enqueue_script( QAHM_NAME . '-echarts', $js_dir_url . 'lib/echarts/echarts.custom.min.js', null, QAHM_PLUGIN_VERSION, false );
+		wp_enqueue_script( QAHM_NAME . '-echarts-wrapper', $js_dir_url . 'lib/echarts/qahm-echarts.js', array( QAHM_NAME . '-echarts' ), QAHM_PLUGIN_VERSION, false );
+		wp_enqueue_script( QAHM_NAME . '-admin-page-realtime', $js_dir_url . 'admin-page-realtime.js', array( QAHM_NAME . '-effect', QAHM_NAME . '-echarts-wrapper' ), QAHM_PLUGIN_VERSION );
 		wp_enqueue_script( QAHM_NAME . '-dayjs', $js_dir_url . 'lib/dayjs/dayjs.min.js', null, QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-dayjs-utc', $js_dir_url . 'lib/dayjs/plugin/utc.js', array( QAHM_NAME . '-dayjs' ), QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-dayjs-timezone', $js_dir_url . 'lib/dayjs/plugin/timezone.js', array( QAHM_NAME . '-dayjs' ), QAHM_PLUGIN_VERSION, false );
-		wp_enqueue_script( QAHM_NAME . '-admin-page-dataviewer', $js_dir_url . 'admin-page-dataviewer.js', array( QAHM_NAME . '-chart' ), QAHM_PLUGIN_VERSION );
+		wp_enqueue_script( QAHM_NAME . '-admin-page-dataviewer', $js_dir_url . 'admin-page-dataviewer.js', null, QAHM_PLUGIN_VERSION );
 
 		// inline script
 		$this->regist_inline_script();
@@ -118,7 +121,7 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 									<?php esc_html_e( 'Device Breakdown', 'qa-heatmap-analytics' ); ?>
 								</div>
 								<div class="qa-zero-graph qa-zero-graph--default qa-zero-realtime-doughnut">
-									<canvas id="device_chart"></canvas>
+									<div id="device_chart" class="qahm-ec-chart"></div>
 								</div>
 							</div>
 							<?php } ?>
@@ -130,7 +133,7 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 									<?php esc_html_e( 'Regions TOP 5', 'qa-heatmap-analytics' ); ?>
 								</div>
 								<div class="qa-zero-graph qa-zero-graph--default">
-									<canvas id="regions_chart"></canvas>
+									<div id="regions_chart" class="qahm-ec-chart"></div>
 								</div>
 							</div>
 							<div class="qa-zero-realtime-summary__block">
@@ -141,7 +144,7 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 									<?php esc_html_e( 'Referrers TOP 5', 'qa-heatmap-analytics' ); ?>
 								</div>
 								<div class="qa-zero-graph qa-zero-graph--default">
-									<canvas id="referrers_chart"></canvas>
+									<div id="referrers_chart" class="qahm-ec-chart"></div>
 								</div>
 							</div>
 						</div>
@@ -171,7 +174,6 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 						</div>
 					</div>
 
-				<?php $this->create_footer_follow(); ?>
 			</div><!-- qa-zero-content_end -->
 		</div>
 		<?php
@@ -316,6 +318,17 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 				}
 			}
 
+			// #1105: 広告トラフィックの source_domain 補完（ファイル直読み経路）
+			// 注: 補完は utm_medium が COMPENSABLE_MEDIA に含まれる場合のみ発動するため、
+			// 後続の utm_medium フォールバック判定（empty チェック）には影響しない。
+			$rt_utm_source = isset( $body['utm_source'] ) ? $body['utm_source'] : '';
+			$rt_utm_medium = isset( $body['utm_medium'] ) ? $body['utm_medium'] : '';
+			$resolved_domain = QAHM_Base::resolve_ad_source_domain( $source_domain, $rt_utm_source, $rt_utm_medium );
+			if ( $resolved_domain !== $source_domain ) {
+				$source_domain      = mb_strimwidth( $resolved_domain, 0, $domain_width, $ellipsis );
+				$source_domain_html = esc_html( $source_domain );
+			}
+
 			$device     = $body['device_name'];
 			$device_map = array(
 				'dsk' => 'desktop',
@@ -326,17 +339,11 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 				$device = $device_map[ $device ];
 			}
 
-			// #903: メディア列（utm_medium — 集客画面と同じ補完ロジック）
-			// #1076: SEARCH_ENGINES 判定を追加（検索エンジン経由を organic として扱う）
+			// #903/#1076/#1508: メディア列＝共通規則（QAHM_Base::derive_medium_for_empty_utm）に一元化。
+			// own_domain は従来この画面に判定が無かったため null 渡し＝空 source_domain（''→(none) に統一）を除き挙動不変（自ドメイン扱いの統一は別 Issue）。
 			$utm_medium = isset( $body['utm_medium'] ) ? $body['utm_medium'] : '';
 			if ( empty( $utm_medium ) ) {
-				if ( 'direct' === $source_domain ) {
-					$utm_medium = '(none)';
-				} elseif ( QAHM_Base::is_search_engine_domain( $source_domain ) ) {
-					$utm_medium = 'organic';
-				} else {
-					$utm_medium = 'referral';
-				}
+				$utm_medium = QAHM_Base::derive_medium_for_empty_utm( $source_domain, null );
 			}
 
 			$dataary      = array();

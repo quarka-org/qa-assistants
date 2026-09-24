@@ -228,6 +228,9 @@
 #class-qahm-admin-page-config .qahm-config__event-type-hidden {
   display: none;
 }
+#class-qahm-admin-page-config .qahm-config__goal-type-hidden {
+  display: none;
+}
 #class-qahm-admin-page-config .qahm-config__event-example {
   background-color: #eee;
   padding: 0 10px;
@@ -319,4 +322,24 @@
 }
 #class-qahm-admin-page-config .td_gtype_save {
   opacity: 0;
+}
+#class-qahm-admin-page-config .qahm-config__status-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+#class-qahm-admin-page-config .qahm-config__status-pill--on {
+  background-color: #006d8f;
+  color: #fff;
+}
+#class-qahm-admin-page-config .qahm-config__status-pill--off {
+  background-color: #e7e5e1;
+  color: #6b6862;
+}
+#class-qahm-admin-page-config .qahm-config__copied-msg {
+  color: #006d8f;
+  font-size: 12px;
 }

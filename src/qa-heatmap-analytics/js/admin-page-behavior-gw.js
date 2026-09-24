@@ -17,11 +17,12 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'media', label: qahml10n['table_media'], width: 8 },
 		{ key: 'past_session', label: qahml10n['table_past_session'], width: 8, type: 'integer' },
 		{ key: 'recent_session', label: qahml10n['table_recent_session'], width: 8, type: 'integer' },
-		{ key: 'growth_rate', label: qahml10n['table_growth_rate'], width: 8, type: 'percentage' },
+		{ key: 'growth_rate', label: qahml10n['table_growth_rate'], width: 8, type: 'percentage', agg: { type: 'derived', compute: function( t ) { var p = t['past_session'], r = t['recent_session']; return ( typeof p === 'number' && p > 0 && typeof r === 'number' ) ? ( ( r - p ) / p ) * 100 : null; } } }, // Issue #1175: 合計行の成長率は (Σ直近−Σ前期)/Σ前期 で正しく再計算（行ごとの率は平均に馴染まないため派生集計）
 		{ key: 'goal_conversion_rate', label: qahml10n['table_goal_conversion_rate'], width: 8, type: 'percentage', typeOptions: { precision: 1 } },
 		{ key: 'goal_completions', label: qahml10n['table_goal_completions'], width: 8, type: 'integer' },
 		{ key: 'goal_value', label: qahml10n['table_goal_value'], width: 8, type: 'integer' },
 		{ key: 'heatmap', label: qahml10n['table_heatmap'], width: 8, sortable: false, exportable: false, filtering: false, formatter: function(value, row) {
+			if ( row._isTotal ) return ''; // Issue #1445: 合計行は特定 URL を持たない＝ヒートマップを開けないため空白
 			return `<div class="qa-table-heatmap-container">
 					<span class="dashicons dashicons-desktop" data-device_name="dsk" data-page_id="${row.page_id}" data-is_landing_page="1" data-media="${row.media}"></span>
 					<span class="dashicons dashicons-tablet" data-device_name="tab" data-page_id="${row.page_id}" data-is_landing_page="1" data-media="${row.media}"></span>
@@ -35,14 +36,15 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
-			column: 'growth_rate',
+			column: 'growth_rate', // 元の仕様：伸び率降順（急上昇＝伸びた順）
 			direction: 'desc'
 		}
 	};
-	growthpageTable = qaTable.createTable('#tb_growthpage', growthpageHeader, growthpageOptions);
+	growthpageTable = qaTable.createTable('#tb_growthpage', growthpageHeader, { ...growthpageOptions, totalRow: { weightKey: 'recent_session', label: qahml10n['table_total'], initialTop: true } }); // Issue #1175: 合計行（CV率は直近セッション加重平均・成長率は派生）。initialTop=初期は最上段・ユーザーがソートしたら1行として動く
 
     let gwradios = document.getElementsByName( `js_gwGoals` );
     for ( let jjj = 0; jjj < gwradios.length; jjj++ ) {
@@ -100,7 +102,11 @@ jQuery(
 jQuery(document).on('qahm:dateRangeChanged', function( RangeStart, RangeEnd ) {
 	qahm.nowAjaxStep = 0;
 	qahm.renderBehaviorGwData(reportDateBetween);
-
+	// [Issue #1231] テーブルは All Goals (gid=0) で再描画されるため、UI のラジオも同期させる
+	let allGoalsRadio = document.getElementById( 'js_gwGoals_0' );
+	if ( allGoalsRadio ) {
+		allGoalsRadio.checked = true;
+	}
 });
 
 qahm.renderBehaviorGwData = function(dateBetweenStr) {

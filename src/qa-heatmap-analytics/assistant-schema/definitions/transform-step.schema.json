@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/transform-step.schema.json",
+  "title": "Transform step",
+  "description": "One operation in a data_source transform pipeline. Exactly one operation per step.",
+  "type": "object",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "required": ["sort"],
+      "properties": {
+        "sort": { "type": "object", "minProperties": 1, "additionalProperties": { "enum": ["asc", "desc"] } }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["limit"],
+      "properties": { "limit": { "type": "integer", "minimum": 1 } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["filter"],
+      "properties": {
+        "filter": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/definitions/filterCondition" }
+        }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["group_by", "agg"],
+      "properties": {
+        "group_by": { "type": "string", "minLength": 1 },
+        "agg": { "type": "object", "minProperties": 1, "additionalProperties": { "enum": ["sum", "avg", "count", "count_distinct", "min", "max", "first"] } },
+        "keep": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["tally"],
+      "properties": {
+        "tally": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["buckets"],
+          "properties": {
+            "buckets": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["into"],
+                "properties": {
+                  "into": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                  "count": { "type": "boolean", "enum": [true] },
+                  "count_distinct": { "type": "string", "minLength": 1 },
+                  "when": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": { "$ref": "#/definitions/filterCondition" }
+                  }
+                },
+                "oneOf": [
+                  { "required": ["count"], "not": { "required": ["count_distinct"] } },
+                  { "required": ["count_distinct"], "not": { "required": ["count"] } }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["calc", "expr"],
+      "properties": {
+        "calc": { "type": "string", "minLength": 1 },
+        "expr": { "type": "string", "minLength": 1 },
+        "scope": { "enum": ["row", "global"] }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["lookup", "key", "into"],
+      "properties": {
+        "lookup": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1 },
+        "into": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["set_var", "expr"],
+      "properties": {
+        "set_var": { "type": "string", "minLength": 1 },
+        "expr": { "type": "string", "minLength": 1 }
+      }
+    },
+    {
+      "$comment": "Issue #1307 (declaration/implementation sync, step 1): extract_host has been implemented since the 2026-06-12 qa-labo sync but was never declared, so a manifest using it was rejected by both validators. Adopted as first-class vocabulary per the 2026-07-22 roadmap ruling (small, unambiguous, useful on its own). The multi-query layer (queries[] / for_each / combine / sources_template / loading_text / native_qal / params) is explicitly FROZEN and must NOT be added here — keeping it out of the schema is what stops new manifests from being written against it.",
+      "additionalProperties": false,
+      "required": ["extract_host"],
+      "properties": {
+        "extract_host": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "into"],
+          "properties": {
+            "from": { "type": "string", "minLength": 1 },
+            "into": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "filterCondition": {
+      "description": "transform.filter supports exactly 8 operators (Issue #1235). prefix / between are NOT supported here (QAL make.filter only). Issue #1308: comparison semantics are shared with tally when / step if — all operands go through $var resolution, eq/neq/in/contains compare string forms, gt/gte/lt/lte coerce both sides with Number().",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "eq": {},
+        "neq": {},
+        "gt": {},
+        "gte": {},
+        "lt": {},
+        "lte": {},
+        "in": {
+          "$comment": "Issue #1308: the \"$var\" string form has been implemented since #1235 (resolveForEachIn) and documented in spec 2.10.0, but the schema only accepted a literal array — a manifest written exactly as the spec teaches was rejected. Aligned here because this PR owns the in operator's resolution rule. The wider declaration/implementation sweep is Issue #1307.",
+          "oneOf": [
+            { "type": "array" },
+            { "type": "string", "pattern": "^\\$" }
+          ]
+        },
+        "contains": { "type": "string" }
+      }
+    }
+  }
+}

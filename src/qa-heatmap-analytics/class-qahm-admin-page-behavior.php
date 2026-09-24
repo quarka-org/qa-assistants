@@ -43,13 +43,13 @@ class QAHM_Admin_Page_Behavior extends QAHM_Admin_Page_Dataviewer {
 
 		// enqueue script
 		$this->common_enqueue_script();
-		wp_enqueue_script( QAHM_NAME . '-chart', $js_dir_url . 'lib/chart/chart.min.js', null, QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-dayjs', $js_dir_url . 'lib/dayjs/dayjs.min.js', null, QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-dayjs-utc', $js_dir_url . 'lib/dayjs/plugin/utc.js', array( QAHM_NAME . '-dayjs' ), QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-dayjs-timezone', $js_dir_url . 'lib/dayjs/plugin/timezone.js', array( QAHM_NAME . '-dayjs' ), QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-moment-with-locales', $js_dir_url . 'lib/moment/moment-with-locales.min.js', null, QAHM_PLUGIN_VERSION, false );
 		wp_enqueue_script( QAHM_NAME . '-daterangepicker', $js_dir_url . 'lib/date-range-picker/daterangepicker.js', array( QAHM_NAME . '-dayjs', QAHM_NAME . '-moment-with-locales' ), QAHM_PLUGIN_VERSION, false );
-		wp_enqueue_script( QAHM_NAME . '-admin-page-dataviewer', $js_dir_url . 'admin-page-dataviewer.js', array( QAHM_NAME . '-dayjs', QAHM_NAME . '-daterangepicker' ), QAHM_PLUGIN_VERSION );
+		wp_enqueue_style( QAHM_NAME . '-daterange' );
+		wp_enqueue_script( QAHM_NAME . '-admin-page-dataviewer', $js_dir_url . 'admin-page-dataviewer.js', array( QAHM_NAME . '-dayjs', QAHM_NAME . '-daterangepicker', QAHM_NAME . '-daterange' ), QAHM_PLUGIN_VERSION );
 		wp_enqueue_script( QAHM_NAME . '-admin-page-behavior', $js_dir_url . 'admin-page-behavior.js', array( QAHM_NAME . '-admin-page-dataviewer' ), QAHM_PLUGIN_VERSION );
 		wp_enqueue_script( QAHM_NAME . '-cap-create', $js_dir_url . 'cap-create.js', array( QAHM_NAME . '-effect' ), QAHM_PLUGIN_VERSION );
 
@@ -175,7 +175,6 @@ class QAHM_Admin_Page_Behavior extends QAHM_Admin_Page_Dataviewer {
 					</div>
 				</div>
 
-				<?php $this->create_footer_follow(); ?>
 			</div>
 		</div>
 		<?php

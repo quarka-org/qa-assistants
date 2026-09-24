@@ -7,7 +7,7 @@ defined( 'ABSPATH' ) || exit;
  * レガシー（main.php方式）アシスタントの基底クラス。
  * 新規アシスタントはマニフェスト方式（class-qahm-assistant-runtime-handler.php）を使用すること。
  *
- * Design spec: docs/specs/assistant-manifest.md
+ * Design spec: docs/specs/assistant/overview.md (and related)
  *
  * @package qa_heatmap_analytics
  */
@@ -478,17 +478,19 @@ class QAHM_Assistant extends QAHM_File_Data {
 	 * @return array ・・・[0] => from_date, [1] => to_date
 	 */
 	public function determine_gsc_from_and_to_dates( $num_days ) {
-		global $qahm_time;
+		// #1153: from-to は暦日なので計測サイトTZで算出（$this->tracking_id が 'all' のときは WP-TZ）。
+		$clock = QAHM_Time::get_site_clock( $this->tracking_id );
 		// GSCデータは3日前が最新
-		$to_date   = $qahm_time->xday_str( -3, $qahm_time->today_str() );
-		$from_date = $qahm_time->xday_str( -( $num_days - 1 ), $to_date );
+		$to_date   = $clock->xday_str( -3, $clock->today_str() );
+		$from_date = $clock->xday_str( -( $num_days - 1 ), $to_date );
 		return array( $from_date, $to_date );
 	}
 	public function determine_normal_from_and_to_dates( $num_days ) {
-		global $qahm_time;
+		// #1153: from-to は暦日なので計測サイトTZで算出（$this->tracking_id が 'all' のときは WP-TZ）。
+		$clock = QAHM_Time::get_site_clock( $this->tracking_id );
 		// 通常は昨日までが最新
-		$to_date   = $qahm_time->xday_str( -1, $qahm_time->today_str() );
-		$from_date = $qahm_time->xday_str( -( $num_days - 1 ), $to_date );
+		$to_date   = $clock->xday_str( -1, $clock->today_str() );
+		$from_date = $clock->xday_str( -( $num_days - 1 ), $to_date );
 		return array( $from_date, $to_date );
 	}
 

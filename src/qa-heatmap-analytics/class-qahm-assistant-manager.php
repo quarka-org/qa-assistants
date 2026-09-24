@@ -16,9 +16,6 @@ class QAHM_Assistant_Manager extends QAHM_File_Data {
 	public const NONCE_API = 'api';
 
 	public function __construct() {
-		// Retrieve a list of assistants
-		add_action( 'init', array( $this, 'get_assistant' ) );
-
 		// Register AJAX functions
 		$this->regist_ajax_func( 'ajax_get_assistant' );
 		$this->regist_ajax_func( 'ajax_connect_assistant' );
@@ -66,6 +63,15 @@ class QAHM_Assistant_Manager extends QAHM_File_Data {
 		global $qahm_assistant_runtime_handler;
 		global $qahm_assistant_legacy_handler;
 
+		// Request-scoped memoization: discovery is a pure read (glob + manifest
+		// parse), so the same argument always yields the same result within one
+		// request. null and '' share a key because both mean "no slug filter".
+		static $cache = array();
+		$cache_key = ( null === $assistant_slug ) ? '' : (string) $assistant_slug;
+		if ( isset( $cache[ $cache_key ] ) ) {
+			return $cache[ $cache_key ];
+		}
+
 		$assistant_dir = WP_PLUGIN_DIR . '/';
 		$assistant_ary = array();
 
@@ -110,6 +116,7 @@ class QAHM_Assistant_Manager extends QAHM_File_Data {
 			}
 		}
 
+		$cache[ $cache_key ] = $assistant_ary;
 		return $assistant_ary;
 	}
 }

@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/step.schema.json",
+  "title": "Scene step",
+  "description": "A single step. Exactly one step type per object.",
+  "type": "object",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": { "message": { "type": "string" } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["choices"],
+      "properties": { "choices": { "$ref": "#/definitions/choices" } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["form"],
+      "properties": { "form": { "$ref": "#/definitions/form" } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["fetch"],
+      "properties": {
+        "fetch": { "type": "string", "minLength": 1 },
+        "on_error": { "type": "string" }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["table"],
+      "properties": {
+        "table": { "type": "string", "minLength": 1 },
+        "row_action": {
+          "type": "object",
+          "description": "Make the table rows selectable. Clicking a row sets variables from $row.<field> and navigates to goto. Omit for a display-only table (Issue #1386).",
+          "additionalProperties": false,
+          "required": ["goto", "label_field"],
+          "properties": {
+            "goto": { "type": "string", "minLength": 1, "description": "Scene to navigate to after a row is clicked." },
+            "label_field": { "type": "string", "minLength": 1, "description": "Column key whose value is echoed into the conversation history as the user's choice." },
+            "set": {
+              "type": "object",
+              "description": "Variables to set from the clicked row. Values may be '$row.<field>' (the clicked row's field, including hidden columns) or a normal value/$var reference."
+            },
+            "clear": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["chart"],
+      "properties": { "chart": { "type": "string", "minLength": 1 } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["scorecard"],
+      "properties": { "scorecard": { "type": "string", "minLength": 1 } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["callout"],
+      "properties": {
+        "callout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string", "minLength": 1, "description": "Body text. Limited markdown (**bold** / [link](url) / line breaks) and {$var} templates are supported (same renderer as message)." },
+            "title": { "type": "string", "description": "Optional bold heading (plain text). May be a 't:' translation reference." },
+            "level": { "enum": ["good", "mid", "bad", "info"], "description": "Colors the box by meaning (good=green / mid=orange / bad=red / info=blue). Omit for a neutral note." }
+          }
+        }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["divider"],
+      "properties": { "divider": { "const": true, "description": "Render a horizontal divider line. Value must be true." } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["html"],
+      "properties": { "html": { "type": "string", "minLength": 1, "description": "Free-form HTML rendered as a full-width block (like table / callout — not a chat bubble). Sanitized by DOMPurify (allowlist: structural tags + QA component classes; script/style/on*/img/svg/iframe removed). {$var} templates are expanded before sanitizing. Advanced/opt-in — prefer message or :::callout for normal content." } }
+    },
+    {
+      "$comment": "Issue #1543 (B-6): then is no longer required on its own — an if with only else is valid. anyOf keeps 'at least one branch' machine-enforced (an if with neither would silently do nothing; the runtime throws on it).",
+      "additionalProperties": false,
+      "required": ["if"],
+      "anyOf": [
+        { "required": ["then"] },
+        { "required": ["else"] }
+      ],
+      "properties": {
+        "if": { "$ref": "#/definitions/ifCondition" },
+        "then": { "$ref": "#/definitions/ifBranch" },
+        "else": { "$ref": "#/definitions/ifBranch" }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["goto"],
+      "properties": { "goto": { "type": "string", "minLength": 1 } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["set"],
+      "properties": { "set": { "type": "object", "minProperties": 1 } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["config_read"],
+      "properties": { "config_read": { "$ref": "#/definitions/configRead" } }
+    },
+    {
+      "additionalProperties": false,
+      "required": ["config_write"],
+      "properties": { "config_write": { "$ref": "#/definitions/configWrite" } }
+    }
+  ],
+  "definitions": {
+    "choices": {
+      "oneOf": [
+        { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/staticChoice" } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_data", "label_field", "goto"],
+          "properties": {
+            "from_data": { "type": "string", "pattern": "^\\$" },
+            "label_field": { "type": "string" },
+            "goto": { "type": "string" },
+            "set": { "type": "object" },
+            "maxItems": { "type": "integer", "minimum": 1 },
+            "clear": { "type": "boolean" },
+            "extra": { "type": "array", "items": { "$ref": "#/definitions/staticChoice" } }
+          }
+        }
+      ]
+    },
+    "staticChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "goto"],
+      "properties": {
+        "label": { "type": "string" },
+        "goto": { "type": "string" },
+        "set": { "type": "object" },
+        "clear": { "type": "boolean" }
+      }
+    },
+    "form": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "submit"],
+      "properties": {
+        "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/field" } },
+        "submit": { "type": "string" },
+        "cancel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "goto"],
+          "properties": { "label": { "type": "string" }, "goto": { "type": "string" } }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "type"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["text", "url", "textarea", "radio", "select", "date_range"] },
+        "label": { "type": "string" },
+        "placeholder": { "type": "string" },
+        "required": { "type": "boolean" },
+        "default": {
+          "type": "string",
+          "description": "Initial value. For date_range: an absolute range 'YYYY-MM-DD/YYYY-MM-DD', or a relative token resolved from today — one of: last_7_days, last_30_days, this_week, last_week, this_month, last_month. An unknown token (or a single date without '/') results in no initial selection."
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "label"],
+            "properties": { "value": { "type": "string" }, "label": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "ifCondition": {
+      "$comment": "Issue #1543 (B-6): either a single condition or an all-of (AND) list. Nesting is intentionally unsupported — an all element must be a single condition, otherwise this grows into an expression engine.",
+      "oneOf": [
+        { "$ref": "#/definitions/ifSingleCondition" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/definitions/ifSingleCondition" },
+              "description": "All conditions must hold (AND). Only AND is supported: use is:\"in\" for an or-of-values on a single variable, or a preceding if with then.set to collapse several variables into one."
+            }
+          }
+        }
+      ]
+    },
+    "ifSingleCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["var", "is"],
+      "properties": {
+        "var": { "type": "string", "minLength": 1 },
+        "is": {
+          "$comment": "Keep this enum in sync with AssistantRuntime.IF_OPERATORS (runtime throws on anything else). Issue #1308: comparison semantics are shared with transform.filter / tally when — eq/neq compare string forms, gt/gte/lt/lte coerce both sides with Number(). Issue #1543 added in (or-of-values on one variable); contains stays filter-only because if reads scalar vars.",
+          "enum": ["empty", "not_empty", "eq", "neq", "gt", "gte", "lt", "lte", "in"]
+        },
+        "value": {
+          "$comment": "Issue #1308: resolved through resolveValue, so \"$var\" / \"$sys.*\" references work here (they were compared literally before). Ignored by empty / not_empty. Issue #1543: for is:\"in\" this must be an array (or a \"$var\" that resolves to one) — NOT expressible here because the constraint is conditional on \"is\", and justinrainbow (PHP) does not evaluate if/then (measured, Issue #1460 W-8): a schema-only rule would be strict in JS and lax in PHP. Enforced instead by E_REF_IF_IN_OPERAND in both validators (ref-checks.js / class-qahm-assistant-schema-validator.php) and by a runtime throw."
+        }
+      }
+    },
+    "ifBranch": {
+      "$comment": "Issue #1543 (B-6): shared shape of then / else. set is applied before goto, so a branch can stage variables and then jump. minProperties:1 keeps an empty branch (which would silently do nothing) invalid — the runtime throws on it too.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "set": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Variable assignments, resolved exactly like the set step (resolveValue, so \"$var\" / \"$sys.*\" work)."
+        },
+        "goto": { "type": "string", "minLength": 1 }
+      }
+    },
+    "configRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "into"],
+      "properties": {
+        "category": { "enum": ["goals", "siteinfo", "custom_data"] },
+        "store": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+        "key": { "type": "string" },
+        "into": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "on_error": { "type": "string" }
+      }
+    },
+    "configWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "value"],
+      "properties": {
+        "category": { "enum": ["goals", "custom_data"] },
+        "store": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+        "key": { "type": "string" },
+        "value": { "type": "object" },
+        "into": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "on_error": { "type": "string" },
+        "rotate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_entries"],
+          "properties": {
+            "max_entries": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "strategy": { "enum": ["oldest"] }
+          }
+        }
+      }
+    }
+  }
+}

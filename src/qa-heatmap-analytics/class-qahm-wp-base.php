@@ -170,9 +170,10 @@ abstract class QAHM_WP_Base extends QAHM_Core_Base {
 	 *
 	 * @param string $url      取得URL。
 	 * @param string $dev_name デバイス種別（smp/tab/dsk）。
+	 * @param int    $timeout  応答待ちの秒数。既定 60。短い待ちで十分な用途（サムネイル取得等）だけが明示的に指定する。
 	 * @return array|\WP_Error WP HTTP API の戻り値。失敗時は WP_Error。
 	 */
-	protected function wrap_remote_get( $url, $dev_name = 'dsk' ) {
+	protected function wrap_remote_get( $url, $dev_name = 'dsk', $timeout = 60 ) {
 		$bot = QAHM_NAME . 'bot/' . QAHM_PLUGIN_VERSION;
 
 		// デバイスによるユーザーエージェント指定
@@ -190,7 +191,7 @@ abstract class QAHM_WP_Base extends QAHM_Core_Base {
 
 		$args = array(
 			'user-agent' => $ua,
-			'timeout'    => 60,
+			'timeout'    => $timeout,
 			'sslverify'  => false,
 		);
 

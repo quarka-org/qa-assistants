@@ -357,7 +357,8 @@ class QAHM_Google_Api extends QAHM_File_Base {
 	 * 3. 1, 2, において成功したurlを返す。失敗した場合はnullを返す
 	 */
 	public function get_property_url() {
-		global $qahm_time;
+		// #1153: GSC接続プローブの日付も計測サイトTZで算出（$this->tracking_id）。
+		$clock = QAHM_Time::get_site_clock( $this->tracking_id );
 
 		if ( $this->prop_url ) {
 			return $this->prop_url;
@@ -384,7 +385,7 @@ class QAHM_Google_Api extends QAHM_File_Base {
 				'Content-Type'  => 'application/json',
 			);
 
-			$date = $qahm_time->xday_str( -5 );
+			$date = $clock->xday_str( -5 );
 			$body = $this->wrap_json_encode(
 				array(
 					'startDate'  => $date,
@@ -424,7 +425,8 @@ class QAHM_Google_Api extends QAHM_File_Base {
 	 * 処理に問題なければnullが返る
 	 */
 	public function test_search_console_connect() {
-		global $qahm_time;
+		// #1153: GSC接続プローブの日付も計測サイトTZで算出（$this->tracking_id）。
+		$clock = QAHM_Time::get_site_clock( $this->tracking_id );
 
 		if ( $this->client === null ) {
 			return false;
@@ -446,7 +448,7 @@ class QAHM_Google_Api extends QAHM_File_Base {
 			'Content-Type'  => 'application/json',
 		);
 
-		$date = $qahm_time->xday_str( -5 );
+		$date = $clock->xday_str( -5 );
 		$body = $this->wrap_json_encode(
 			array(
 				'startDate'  => $date,
@@ -485,15 +487,16 @@ class QAHM_Google_Api extends QAHM_File_Base {
 	 */
 	public function insert_search_console_keyword( $start_date, $end_date ) {
 		global $qahm_db;
-		global $qahm_time;
 		global $qahm_log;
+		// #1153: GSCデータの暦日（取得対象日・更新判定）は計測サイトTZで（$this->tracking_id）。
+		$clock = QAHM_Time::get_site_clock( $this->tracking_id );
 
 		$db_query_error_flg = false;
 
 		// 今日の日付の3日前のデータは溜まっていない可能性があるのでサーチしない
-		$tar_date = $qahm_time->today_str();
-		$tar_date = $qahm_time->xday_str( '-3', $tar_date );
-		if ( $qahm_time->xday_num( $start_date, $tar_date ) > 0 ) {
+		$tar_date = $clock->today_str();
+		$tar_date = $clock->xday_str( '-3', $tar_date );
+		if ( $clock->xday_num( $start_date, $tar_date ) > 0 ) {
 			return;
 		}
 
@@ -651,7 +654,7 @@ class QAHM_Google_Api extends QAHM_File_Base {
 					// update_dateが$start_dateより古いキーワードを更新
 					$query_id_to_update = array();
 					foreach ( $result_select_existing as $row ) {
-						if ( $qahm_time->xday_num( $row['update_date'], $start_date ) < 0 ) {
+						if ( $clock->xday_num( $row['update_date'], $start_date ) < 0 ) {
 							$query_id_to_update[] = $row['query_id'];
 						}
 					}
@@ -729,22 +732,23 @@ class QAHM_Google_Api extends QAHM_File_Base {
 	 *      NULL ...それ以外の場合
 	 */
 	public function create_search_console_data( $start_date, $end_date, $is_month_data, $timeout_sec = 80 ) {
-		global $qahm_time;
 		global $qahm_db;
 		global $qahm_log;
+		// #1153: GSCデータの暦日（取得対象日・更新判定・月判定）は計測サイトTZで（$this->tracking_id）。
+		$clock = QAHM_Time::get_site_clock( $this->tracking_id );
 
 		// 今日の日付の3日前のデータは溜まっていない可能性があるのでサーチしない
-		$tar_date = $qahm_time->today_str();
-		$tar_date = $qahm_time->xday_str( '-3', $tar_date );
-		if ( $qahm_time->xday_num( $start_date, $tar_date ) > 0 ) {
+		$tar_date = $clock->today_str();
+		$tar_date = $clock->xday_str( '-3', $tar_date );
+		if ( $clock->xday_num( $start_date, $tar_date ) > 0 ) {
 			return;
 		}
 		if ( $is_month_data ) {
 			// 今日の日付の3日前が同じ月ならサーチコンソールの月データが溜まっていない可能性があるので処理を省く
-			$comp_y = $qahm_time->year( $start_date );
-			$comp_m = $qahm_time->month( $start_date );
-			$tar_y  = $qahm_time->year( $tar_date );
-			$tar_m  = $qahm_time->month( $tar_date );
+			$comp_y = $clock->year( $start_date );
+			$comp_m = $clock->month( $start_date );
+			$tar_y  = $clock->year( $tar_date );
+			$tar_m  = $clock->month( $tar_date );
 			if ( $comp_y > $tar_y ) {
 				return;
 			}
@@ -916,7 +920,7 @@ class QAHM_Google_Api extends QAHM_File_Base {
 					// update_dateが$start_dateより古いキーワードを更新
 					$qa_pages_id_to_update = array();
 					foreach ( $existing_qa_pages as $row ) {
-						if ( $qahm_time->xday_num( $row['update_date'], $start_date ) < 0 ) {
+						if ( $clock->xday_num( $row['update_date'], $start_date ) < 0 ) {
 							$qa_pages_id_to_update[] = $row['page_id'];
 						}
 					}
@@ -945,7 +949,7 @@ class QAHM_Google_Api extends QAHM_File_Base {
 					$insert_val_ary     = array();
 					$new_pages_url_hash = array();
 
-					$qahm_time_now = $qahm_time->now_str();
+					$qahm_time_now = $clock->now_str();
 					// 既に存在するページを除く
 					if ( ! empty( $existing_qa_pages ) ) {
 						foreach ( $gsc_pages_chunk as $page ) {
@@ -1271,7 +1275,7 @@ class QAHM_Google_Api extends QAHM_File_Base {
 
 				// データをファイルに保存
 				// APIエラーが発生しなければ、データなしでもファイル保存。ただし GSC API の遅れが出ることもあるので、empty&&直近7日以内だったらファイル保存しない。
-				if ( ! empty( $merged_gsc_lp_query_ary ) || ( $qahm_time->xday_num( $start_date, $tar_date ) < -7 ) ) {
+				if ( ! empty( $merged_gsc_lp_query_ary ) || ( $clock->xday_num( $start_date, $tar_date ) < -7 ) ) {
 					$is_saved = $this->wrap_put_contents( $gsc_lp_query_file, $this->wrap_serialize( $merged_gsc_lp_query_ary ) );
 
 					if ( ! $is_saved ) {
@@ -1318,4 +1322,203 @@ class QAHM_Google_Api extends QAHM_File_Base {
 		}
 		return $cut_str;
 	}
+
+	/**
+	 * GA4 Admin API: アカウントサマリー（プロパティ一覧）取得
+	 *
+	 * @return array|null レスポンス配列、またはnull（クライアント未初期化時）
+	 */
+	public function get_ga4_account_summaries() {
+		if ( ! $this->client ) {
+			return null;
+		}
+
+		$token = $this->client->getAccessToken();
+		if ( ! $token || ! isset( $token['access_token'] ) ) {
+			return array( 'error' => 'No access token available' );
+		}
+
+		$headers = array( 'Authorization' => 'Bearer ' . $token['access_token'] );
+		$ep_url  = 'https://analyticsadmin.googleapis.com/v1beta/accountSummaries';
+
+		$all_summaries = array();
+
+		// ページネーションループ
+		$next_token = null;
+		do {
+			$request_url = $ep_url;
+			if ( $next_token !== null ) {
+				$request_url = $ep_url . '?pageToken=' . urlencode( $next_token );
+			}
+
+			$response = wp_remote_get( $request_url, array( 'headers' => $headers, 'timeout' => 30 ) );
+
+			if ( is_wp_error( $response ) ) {
+				return array( 'error' => $response->get_error_message() );
+			}
+
+			$status_code = wp_remote_retrieve_response_code( $response );
+			if ( $status_code !== 200 ) {
+				return array( 'error' => 'HTTP ' . $status_code . ': ' . wp_remote_retrieve_body( $response ) );
+			}
+
+			$body = json_decode( wp_remote_retrieve_body( $response ), true );
+			if ( ! is_array( $body ) ) {
+				return array( 'error' => 'Invalid JSON response' );
+			}
+
+			if ( isset( $body['accountSummaries'] ) && is_array( $body['accountSummaries'] ) ) {
+				$all_summaries = array_merge( $all_summaries, $body['accountSummaries'] );
+			}
+
+			$next_token = isset( $body['nextPageToken'] ) ? $body['nextPageToken'] : null;
+
+		} while ( $next_token !== null );
+
+		return array( 'accountSummaries' => $all_summaries );
+	}
+
+	/**
+	 * GA4 Data API: runReport
+	 *
+	 * @param string $property_id GA4プロパティID（数字のみ）
+	 * @param string $start_date 開始日（YYYY-MM-DD）
+	 * @param string $end_date 終了日（YYYY-MM-DD）
+	 * @param array $dimensions ディメンション名の配列
+	 * @param array $metrics メトリクス名の配列
+	 * @return array|null レスポンス配列、またはnull（クライアント未初期化時）
+	 */
+	public function get_ga4_report( $property_id, $start_date, $end_date, $dimensions, $metrics ) {
+		if ( ! $this->client ) {
+			return null;
+		}
+
+		$token = $this->client->getAccessToken();
+		if ( ! $token || ! isset( $token['access_token'] ) ) {
+			return array( 'error' => 'No access token available' );
+		}
+
+		$headers = array(
+			'Authorization' => 'Bearer ' . $token['access_token'],
+			'Content-Type'  => 'application/json',
+		);
+
+		$ep_url = 'https://analyticsdata.googleapis.com/v1beta/properties/' . $property_id . ':runReport';
+
+		$dim_array = array();
+		foreach ( $dimensions as $d ) {
+			$dim_array[] = array( 'name' => $d );
+		}
+		$met_array = array();
+		foreach ( $metrics as $m ) {
+			$met_array[] = array( 'name' => $m );
+		}
+
+		$all_rows = array();
+		$first_response = null;
+		$offset = 0;
+		$limit  = 10000;
+
+		// ページネーションループ
+		do {
+			$request_body = array(
+				'dateRanges' => array( array( 'startDate' => $start_date, 'endDate' => $end_date ) ),
+				'dimensions' => $dim_array,
+				'metrics'    => $met_array,
+				'limit'      => $limit,
+				'offset'     => $offset,
+			);
+
+			$body_json = $this->wrap_json_encode( $request_body );
+
+			$response = wp_remote_post( $ep_url, array(
+				'headers' => $headers,
+				'body'    => $body_json,
+				'timeout' => 60,
+			) );
+
+			if ( is_wp_error( $response ) ) {
+				return array( 'error' => $response->get_error_message() );
+			}
+
+			$status_code = wp_remote_retrieve_response_code( $response );
+			if ( $status_code !== 200 ) {
+				return array( 'error' => 'HTTP ' . $status_code . ': ' . wp_remote_retrieve_body( $response ) );
+			}
+
+			$decoded = json_decode( wp_remote_retrieve_body( $response ), true );
+			if ( ! is_array( $decoded ) ) {
+				return array( 'error' => 'Invalid JSON response' );
+			}
+
+			if ( $first_response === null ) {
+				$first_response = $decoded;
+			}
+
+			if ( isset( $decoded['rows'] ) && is_array( $decoded['rows'] ) ) {
+				$all_rows = array_merge( $all_rows, $decoded['rows'] );
+			}
+
+			// rowCount で全件数を確認
+			$total_rows = isset( $decoded['rowCount'] ) ? (int) $decoded['rowCount'] : 0;
+			$offset += $limit;
+
+		} while ( $offset < $total_rows && isset( $decoded['rows'] ) && count( $decoded['rows'] ) >= $limit );
+
+		// 結合した結果を返す
+		if ( $first_response !== null ) {
+			$first_response['rows'] = $all_rows;
+		}
+
+		return $first_response;
+	}
+
+	/**
+	 * GA4月次レポート一括取得（age_gender, country, region）
+	 *
+	 * @param string $property_id GA4プロパティID（数字のみ）
+	 * @param string $year_month YYYY-MM形式
+	 * @return array 3レポートの配列、またはerrorキーを含む配列
+	 */
+	public function fetch_ga4_monthly_reports( $property_id, $year_month ) {
+		$start_date = $year_month . '-01';
+		$end_date   = gmdate( 'Y-m-t', strtotime( $start_date ) );
+
+		// age_gender レポート
+		$age_gender_result = $this->get_ga4_report(
+			$property_id, $start_date, $end_date,
+			array( 'userAgeBracket', 'userGender' ),
+			array( 'sessions', 'activeUsers' )
+		);
+		if ( $age_gender_result === null || isset( $age_gender_result['error'] ) ) {
+			return $age_gender_result !== null ? $age_gender_result : array( 'error' => 'GA4 API client not initialized' );
+		}
+
+		// country レポート
+		$country_result = $this->get_ga4_report(
+			$property_id, $start_date, $end_date,
+			array( 'countryId' ),
+			array( 'sessions', 'activeUsers' )
+		);
+		if ( $country_result === null || isset( $country_result['error'] ) ) {
+			return $country_result !== null ? $country_result : array( 'error' => 'GA4 API client not initialized' );
+		}
+
+		// region レポート
+		$region_result = $this->get_ga4_report(
+			$property_id, $start_date, $end_date,
+			array( 'region' ),
+			array( 'sessions', 'activeUsers' )
+		);
+		if ( $region_result === null || isset( $region_result['error'] ) ) {
+			return $region_result !== null ? $region_result : array( 'error' => 'GA4 API client not initialized' );
+		}
+
+		return array(
+			'age_gender' => $age_gender_result,
+			'country'    => $country_result,
+			'region'     => $region_result,
+		);
+	}
+
 } // end of class

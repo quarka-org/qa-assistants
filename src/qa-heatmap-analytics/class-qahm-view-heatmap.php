@@ -13,8 +13,16 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	const ATTENTION_LIMIT_TIME = 30;
 	//熟読度
 	const MAX_READING_LEVEL = 37.5;
-	const ONE_PER_SIX       = 1 / 6;
-	const FOUR_PER_SIX      = 4 / 6;
+	const ONE_PER_SIX = 1 / 6;
+	const FOUR_PER_SIX = 4 / 6;
+
+	// P7-D Phase 1 (#1466): ヒートマップ Step6 の view_pv メタ取得を allpv 列DB 直読み（QAL 経路）へ差し替えるフラグ。
+	// true（既定・#1492 で ON）: QAL 経路（is_raw は #1463 の native 列を直読み・名簿列は非 keep で get_qa_readers は
+	//           不発火・utm 系は resolve_master_columns で復元）。狙い＝Step6 の get_pv_log/get_qa_readers ×日数を排する。
+	// false: 旧 view_pv SQL 経路を逐語温存（戻し方＝この1行を false へ。書き込み側は不触＝完全可逆）。
+	// 安全網: カバレッジガード（列DB dir 実在＋過去日の done 一律＋データ有り日の is_raw 列存在）を
+	//         満たせなければ旧経路へ all-or-nothing フォールバック。
+	const HEATMAP_QAL_ENABLED = true;
 
 	public function __construct() {
 		$this->regist_ajax_func( 'ajax_create_heatmap_file' );
@@ -22,12 +30,149 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		$this->regist_ajax_func( 'ajax_update_page_version' );
 		//QA ZERO
 		$this->regist_ajax_func( 'ajax_get_separate_data' );
+		$this->regist_ajax_func( 'ajax_create_live_view_token' );
 		//QA ZERO END
 		add_action( 'init', array( $this, 'init_wp_filesystem' ) );
 	}
 
 	public function get_heatmap_view_work_dir_url() {
 		return parent::get_data_dir_url() . 'heatmap-view-work/';
+	}
+
+	/**
+	 * P7-D Phase 1 (#1466): ヒートマップ Step6 の PV メタを allpv 列DB（QAL 経路）から取得する。
+	 *
+	 * native 列のみを storage から取得（マスター参照列を混ぜないためフォールバックしない）し、utm 系は
+	 * canonical な resolve_master_columns（qal-material 公開 API）で復元する（RM_R1 view_pv 再構成と同一
+	 * 解決器＝utm/source_domain の byte 等価を担保・#1105 広告補完込み）。名簿列（os/browser/language/
+	 * country_code）は要求しないため律速の get_qa_readers は発火しない。
+	 *
+	 * access_time は allpv 列DB でも unixtime(uint32) 格納＝旧 view_pv と同一形式（変換不要）。is_raw は
+	 * クエリで絞らず全 PV を返す（旧 SQL と同じく消費側ループが truthy 判定する）。
+	 *
+	 * @param string $tracking_id トラッキングID
+	 * @param int    $page_id     ページID
+	 * @param string $start_date  期間開始（'Y-m-d'）
+	 * @param string $end_date    期間終了（'Y-m-d'）
+	 * @return array|null 行配列（各行 assoc・キーは列名＋復元 utm）。storage 未取得/エラーなら null（呼び出し側で旧経路へフォールバック）。0件は空配列。
+	 */
+	private function heatmap_fetch_pv_meta_qal( $tracking_id, $page_id, $start_date, $end_date ) {
+		global $qahm_qal_storage, $qahm_qal_material;
+		if ( ! is_object( $qahm_qal_storage ) || ! is_object( $qahm_qal_material ) ) {
+			return null;
+		}
+
+		$time_range       = array(
+			'start' => $start_date,
+			'end'   => $end_date,
+			'tz'    => 'Asia/Tokyo',
+		);
+		$filter           = array( 'page_id' => array( (int) $page_id ) );
+		$physical_columns = array(
+			'pv_id',
+			'device_id',
+			'access_time',
+			'pv',
+			'version_id',
+			'is_raw_p',
+			'is_raw_c',
+			'is_raw_e',
+			'source_id',
+			'medium_id',
+			'campaign_id',
+		);
+
+		$result = $qahm_qal_storage->fetch_filtered_data( $tracking_id, 'allpv', $time_range, $filter, $physical_columns, false );
+		if ( ! is_array( $result ) || isset( $result['error_code'] ) || ! isset( $result['data'] ) ) {
+			return null;
+		}
+
+		$rows = $result['data'];
+		if ( empty( $rows ) ) {
+			return array();
+		}
+
+		// utm 系（utm_source/utm_medium/utm_campaign/source_domain）を canonical resolver で復元。
+		return $qahm_qal_material->resolve_master_columns( $rows, array( 'utm_source', 'utm_medium', 'utm_campaign', 'source_domain' ), $tracking_id );
+	}
+
+	/**
+	 * P7-D Phase 1 (#1466): QAL 経路のカバレッジガード。
+	 *
+	 * storage の fetch_filtered_data は lenient で、未変換日・is_raw 列欠落日を静かに欠落・null で返す
+	 * （＝PV / raw PV のサイレント取りこぼしになる）。そのため fetch の前に以下を検査し、1つでも
+	 * 満たせなければ false ＝呼び出し側は旧 view_pv 経路へ all-or-nothing でフォールバックする。
+	 *
+	 *   1. allpv 列DB ディレクトリが実在する（不在だと storage が get_view_pv 経路へ黙ってフォールバックし、
+	 *      その経路は page_id フィルタを解さない＝他ページの PV が混入するため、到達自体を絶つ）。
+	 *   2. 範囲内の【過去日】すべてに done の証拠がある（未変換日＝チェーン途中死・バックログ・converting 中と、
+	 *      データ無し日を列DB側だけでは区別できないため、一律 done を要求＝安全側）。
+	 *   3. データが在る done 日（page_id 列在）には is_raw_p 列も在る。
+	 *
+	 * 当日以降は検査対象外＝qa_pv_log INSERT も view_pv ビルドも夜間のみ（昨日まで）で、新旧どちらの
+	 * 経路にも当日データは存在しない（出力差を生まない）。「今日」は変換器（columndb-cron）と同一の
+	 * QAHM_Time::today_str('Ymd') で判定＝境界が定義から一致する。
+	 *
+	 * ※ #1463 の is_raw backfill は raw 不在日を恒久 skip する（watermark は前進）ため、watermark でなく
+	 *    列ファイルの実在で判定する（backfill 済みでも is_raw 列を持たない日が残りうる）。
+	 * ※ base_dir は storage の get_columndb_base_dir（private）と同一リテラル＝fetch が実際に読む場所。
+	 * ※ ゼロトラフィック日（gap 日）を含む範囲は done マーカーが無く false ＝旧経路（正しさ不変・速さのみ
+	 *    失う）。#1420 の nodata マーキング（既定 OFF）が有効化されれば done/expected=0 が書かれ通るようになる。
+	 *
+	 * @param string $tracking_id トラッキングID
+	 * @param string $start_date  期間開始（'Y-m-d'）
+	 * @param string $end_date    期間終了（'Y-m-d'）
+	 * @return bool 列DB dir が実在し、範囲内の過去日すべてが done（データ有り日は is_raw 列も在る）なら true。
+	 */
+	private function heatmap_qal_coverage_ok( $tracking_id, $start_date, $end_date ) {
+		global $qahm_time;
+		if ( ! is_object( $qahm_time ) ) {
+			return false;
+		}
+
+		$base_dir = WP_CONTENT_DIR . '/qa-zero-data/report/' . $tracking_id . '/columns-db/allpv/';
+		// 列DB 未ビルドの tracking は即 false。storage の fetch は allpv ディレクトリ不在だと get_view_pv 経路へ
+		// 黙ってフォールバックし、その経路は page_id フィルタ（indexed-array 形式）を解さない＝他ページの PV が
+		// 混入するため、ここで到達自体を絶つ。
+		if ( ! is_dir( $base_dir ) ) {
+			return false;
+		}
+
+		try {
+			$cur = new DateTime( $start_date );
+			$end = new DateTime( $end_date );
+		} catch ( Exception $e ) {
+			return false;
+		}
+
+		// 変換器の当日スキップ境界（columndb-cron の $clock->today_str('Ymd')）と同一 API＝同一定義。
+		// 当日以降は qa_pv_log INSERT も view_pv ビルドも夜間のみ（昨日まで）＝新旧どちらの経路にも
+		// 存在しない＝検査対象外。過去日だけを検査する。
+		$today_ymd = $qahm_time->today_str( 'Ymd' );
+
+		while ( $cur <= $end ) {
+			$ymd = $cur->format( 'Ymd' );
+			if ( $ymd < $today_ymd ) {
+				// ① 過去日は「done の証拠」を一律要求する。未変換日（夜間チェーン途中死・バックログ・
+				//    PR5 ドリフト再ホームの converting 中）とデータ無し日を列DB側だけでは区別できないため、
+				//    証拠が無ければ安全側＝旧経路へ（データ無し日は #1420 の nodata マーキングが入れば通る）。
+				//    is_day_done は entry があれば state=done を、無ければ pv_id 列ファイル存在（導入前 legacy 日）で判定。
+				if ( ! class_exists( 'QAHM_ColumnDB_Manifest' )
+					|| ! QAHM_ColumnDB_Manifest::is_day_done( $base_dir, 'allpv', $ymd ) ) {
+					return false;
+				}
+				// ② データが在る done 日は is_raw_p 列が必須。欠落＝QAL 経路では raw を取りこぼす→旧経路でのみ正しく描ける。
+				$ym          = substr( $ymd, 0, 6 );
+				$pageid_file = $base_dir . $ym . '/allpv_' . $ymd . '_page_id.php';
+				$israw_file  = $base_dir . $ym . '/allpv_' . $ymd . '_is_raw_p.php';
+				if ( file_exists( $pageid_file ) && ! file_exists( $israw_file ) ) {
+					return false;
+				}
+			}
+			$cur->modify( '+1 day' );
+		}
+
+		return true;
 	}
 
 
@@ -38,16 +183,16 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		global $qahm_log;
 
 		try {
-			$start_date  = $this->wrap_filter_input( INPUT_POST, 'start_date' );
-			$end_date    = $this->wrap_filter_input( INPUT_POST, 'end_date' );
-			$tracking_id = $this->wrap_filter_input( INPUT_POST, 'tracking_id' );
-			$page_id     = (int) $this->wrap_filter_input( INPUT_POST, 'page_id' );
-			$device_name = $this->wrap_filter_input( INPUT_POST, 'device_name' );
-			$device_id   = $this->device_name_to_device_id( $device_name );
-			$version_id  = $this->get_version_id( $page_id, $device_id );
-			if ( ! $version_id ) {
+			$start_date      = $this->wrap_filter_input( INPUT_POST, 'start_date' );
+			$end_date        = $this->wrap_filter_input( INPUT_POST, 'end_date' );
+			$tracking_id     = $this->wrap_filter_input( INPUT_POST, 'tracking_id' );
+			$page_id         = (int) $this->wrap_filter_input( INPUT_POST, 'page_id' );
+			$device_name     = $this->wrap_filter_input( INPUT_POST, 'device_name' );
+			$device_id       = $this->device_name_to_device_id( $device_name );
+			$version_id      = $this->get_version_id( $page_id, $device_id );
+			if( ! $version_id ) {
 				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
-				echo $this->wrap_json_encode( __( 'バージョンIDが存在しません。', 'qa-heatmap-analytics' ) );
+				echo $this->wrap_json_encode( __( 'Version ID does not exist.', 'qa-heatmap-analytics' ) );
 				die();
 			}
 
@@ -87,8 +232,8 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	public function get_version_id( $page_id, $device_id ) {
 		global $qahm_db;
 
-		$table_name   = 'view_page_version_hist';
-		$query        = 'SELECT version_id,device_id,version_no FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d';
+		$table_name = 'view_page_version_hist';
+		$query = 'SELECT version_id,device_id,version_no FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d';
 		$version_hist = $qahm_db->get_results( $qahm_db->prepare( $query, $page_id ), ARRAY_A );
 
 		// DBに格納されている一番新しいバージョンを取得する
@@ -118,6 +263,18 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	// 期間内の全PVをもってくる
 
 	/**
+	 * separate キー成分のエンコード（#1512）
+	 *
+	 * キーは「media_source_campaign_goal」の「_」連結で、JS 側（live-view.js / heatmap-bar.js）が split('_') で分解する。
+	 * 成分（utm 値・URL 断片等）に「_」が含まれると分解が壊れるため、成分側の「_」を必ず潰す。
+	 * rawurlencode は「_」を素通しする（RFC 3986 unreserved）ため、追加で「_」→「%5F」に変換する。
+	 * JS 側の復元は decodeURIComponent（%5F は「_」へ戻る）。
+	 */
+	private static function encode_separate_key_component( $value ) {
+		return str_replace( '_', '%5F', rawurlencode( (string) $value ) );
+	}
+
+	/**
 	 * ヒートマップビュー用の一時ファイルを作成
 	 * 関数名は一時的なもの。残ったQAの処理をこちらの関数に移行した際にzeroを外す予定
 	 */
@@ -127,18 +284,18 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		global $qahm_log;
 		global $qahm_time;
 
-		$file_base_name = $version_id . '_' . preg_replace( '/[\s:-]+/', '', $start_date ) . '_' . preg_replace( '/[\s:-]+/', '', $end_date ) . '_' . $is_landing_page . '_' . $tracking_id;
+		$file_base_name = $version_id . '_' . str_replace( array( ' ', ':', '-' ), '', $start_date ) . '_' . str_replace( array( ' ', ':', '-' ), '', $end_date ) . '_' . $is_landing_page . '_' . $tracking_id;
 
 		//ゴールセッションを取得
 		global $qahm_data_api;
-		$dateterm = 'date = between ' . $this->wrap_substr( $start_date, 0, 10 ) . ' and ' . $this->wrap_substr( $end_date, 0, 10 );
+		$dateterm = 'date = between ' . $this->wrap_substr($start_date, 0, 10) . ' and ' . $this->wrap_substr($end_date, 0, 10);
 		// $goals_sessions配列をキーをpv_idとする新しい配列に変換します。
 		$goals_sessions_keys = array();
-		$all_goals_sessions  = $qahm_data_api->get_goals_sessions( $dateterm, $tracking_id );
-		foreach ( $all_goals_sessions as $goals_sessions ) {
+		$all_goals_sessions = $qahm_data_api->get_goals_sessions( $dateterm, $tracking_id );
+		foreach ($all_goals_sessions as $goals_sessions ) {
 			foreach ( $goals_sessions as $goal_session ) {
 				foreach ( $goal_session as $session ) {
-					$goals_sessions_keys[ $session['pv_id'] ] = true;
+					$goals_sessions_keys[ $session[ 'pv_id' ] ] = true;
 				}
 			}
 		}
@@ -161,22 +318,22 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 		$merge_att_scr_ary_v1 = array();
 		$merge_att_scr_ary_v2 = array();
-		$merge_click_ary      = array();
+		$merge_click_ary   = array();
 		//QA ZERO
 		// QA ZERO はv2のみ
-		$pkey_merge_att_scr_ary_v2     = array();
+		$pkey_merge_att_scr_ary_v2 = array();
 		$separate_merge_att_scr_ary_v2 = array();
-		$separate_total_stay_time      = array();
-		$separate_exit_idx             = array();
-		$separate_merge_click_ary      = array();
-		$separate_data_num             = array();
-		$separate_time_on_page         = array();
+		$separate_total_stay_time = array();
+		$separate_exit_idx = array();
+		$separate_merge_click_ary = array();
+		$separate_data_num = array();
+		$separate_time_on_page = array();
 		//QA ZERO END
-		$data_num     = 0;
-		$time_on_page = 0;
+		$data_num          = 0;
+		$time_on_page      = 0;
 
-		$table_name           = 'view_page_version_hist';
-		$query                = 'SELECT version_id,page_id,device_id,version_no,base_html,base_selector FROM ' . $qahm_db->prefix . $table_name . ' WHERE version_id = %d';
+		$table_name = 'view_page_version_hist';
+		$query = 'SELECT version_id,page_id,device_id,version_no,base_html,base_selector FROM ' . $qahm_db->prefix . $table_name . ' WHERE version_id = %d';
 		$qa_page_version_hist = $qahm_db->get_results( $qahm_db->prepare( $query, $version_id ), ARRAY_A );
 		if ( ! $qa_page_version_hist ) {
 			return null;
@@ -195,6 +352,12 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		$device_name       = $this->device_id_to_device_name( $device_id );
 		$base_html         = $qa_page_version_hist['base_html'];
 
+		// グローバルセレクタ辞書（gXX形式のセレクタ復元用、Phase 1）
+		$global_selectors  = null;
+		if ( class_exists( 'QAHM_ColumnDB_Selectors' ) ) {
+			$global_selectors = new QAHM_ColumnDB_Selectors( $tracking_id );
+		}
+
 		// 同じpage_idかつ同じdevice_idの全てのqa_page_version_histを取得
 		// この処理はヒートマップビューでバージョン変更できるようにするため
 		//
@@ -202,26 +365,26 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		// page_idで取得した後にdevice_idでフィルタリングする
 
 		// 同じpage_idの全てのqa_page_version_histを取得
-		$query            = 'SELECT version_id,device_id,version_no,insert_datetime FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d';
+		$query = 'SELECT version_id,device_id,version_no,insert_datetime FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d';
 		$all_version_hist = $qahm_db->get_results( $qahm_db->prepare( $query, $page_id ), ARRAY_A );
 		if ( ! $all_version_hist ) {
 			return null;
 		}
 
 		// 最新のversion_noを持つ各デバイスのversion_idを配列に格納
-		$device_version_ary        = array();
+		$device_version_ary = array();
 		$device_version_no_max_ary = array();
-		foreach ( $all_version_hist as $hist ) {
-			$temp_device_id   = $hist['device_id'];
+		foreach ($all_version_hist as $hist) {
+			$temp_device_id = $hist['device_id'];
 			$temp_device_name = $this->device_id_to_device_name( $temp_device_id );
-			$temp_version_no  = (int) $hist['version_no'];
-			$temp_version_id  = (int) $hist['version_id'];
-			if ( ! isset( $device_version_ary[ $temp_device_name ] ) || $temp_version_no > $device_version_no_max_ary[ $temp_device_name ] ) {
-				$device_version_ary[ $temp_device_name ]        = $temp_version_id;
-				$device_version_no_max_ary[ $temp_device_name ] = $temp_version_no;
+			$temp_version_no = (int) $hist['version_no'];
+			$temp_version_id = (int) $hist['version_id'];
+			if (!isset($device_version_ary[$temp_device_name]) || $temp_version_no > $device_version_no_max_ary[$temp_device_name]) {
+				$device_version_ary[$temp_device_name] = $temp_version_id;
+				$device_version_no_max_ary[$temp_device_name] = $temp_version_no;
 			}
 		}
-		unset( $device_version_no_max_ary );
+		unset($device_version_no_max_ary);
 
 		// 同デバイスの全バージョンを$all_version_ary配列に格納
 		// device_idが一致するレコードをフィルタリング
@@ -237,39 +400,37 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		}
 
 		// version_noの降順でソート
-		usort(
-			$filtered_version_hist,
-			function ( $a, $b ) {
-				return $b['version_no'] - $a['version_no'];
-			}
-		);
+		usort($filtered_version_hist, function($a, $b) {
+			return $b['version_no'] - $a['version_no'];
+		});
 
-		$all_version_ary   = array();
+		$all_version_ary = array();
 		$previous_datetime = null; // 以前の日時を格納する変数
-		$current_date      = $qahm_time->today_str( 'Y/m/d' ); // 現在の日付を取得
+		$current_date = $qahm_time->today_str( 'Y/m/d' ); // 現在の日付を取得
 		//$current_date = $qahm_time->xday_str( '-1', 'now', 'Y/m/d' ); // 現在の日付に-1日した文字列を取得
 
-		for ( $i = 0; $i < $this->wrap_count( $filtered_version_hist ); $i++ ) {
-			$hist             = $filtered_version_hist[ $i ];
-			$current_datetime = gmdate( 'Y/m/d', strtotime( $hist['insert_datetime'] ) ); // datetimeを日付のみに変換
+		for ($i = 0; $i < $this->wrap_count($filtered_version_hist); $i++) {
+			$hist = $filtered_version_hist[$i];
+			$current_datetime = gmdate('Y/m/d', strtotime($hist['insert_datetime'])); // datetimeを日付のみに変換
 
-			if ( $i == 0 ) {
+			if ($i == 0) {
 				// 先頭のループでは開始日時から現在日時までの期間
-				$period_string = $current_datetime . ' - ' . $current_date;
+				$period_string = $current_datetime . " - " . $current_date;
 			} else {
 				// それ以降のループでは期間を作成
 				$period_string = $current_datetime . ' - ' . $previous_datetime;
 			}
 
-			$all_version_ary[] = array(
-				'version_id'     => $hist['version_id'],
-				'version_no'     => $hist['version_no'],
-				'version_period' => $period_string,
-			);
+			$all_version_ary[] = [
+				'version_id' => $hist['version_id'],
+				'version_no' => $hist['version_no'],
+				'version_period' => $period_string
+			];
 
 			// 現在の日時を以前の日時として更新
 			$previous_datetime = $current_datetime;
 		}
+
 
 		// wp_qa_type,wp_qa_idはZEROではいらないがエラー回避のため今は残しておく
 		$table_name = 'qa_pages';
@@ -283,16 +444,23 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		}
 
 		//speed up 2023/12/03 by maruyama
-		$table_name = 'view_pv';
-		$query      = 'SELECT pv_id,device_id,access_time,pv,version_id,is_raw_p,is_raw_c,is_raw_e,utm_medium,utm_source,source_domain,utm_campaign FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d and access_time between %s and %s';
-		$res_ary    = $qahm_db->get_results( $qahm_db->prepare( $query, $page_id, $start_date, $end_date ), ARRAY_A );
+		// P7-D Phase 1 (#1466): QAL 経路（allpv 列DB 直読み）を優先し、満たせない時は旧 view_pv SQL 経路へフォールバック。
+		$res_ary = null;
+		if ( self::HEATMAP_QAL_ENABLED && $this->heatmap_qal_coverage_ok( $tracking_id, $start_date, $end_date ) ) {
+			$res_ary = $this->heatmap_fetch_pv_meta_qal( $tracking_id, $page_id, $start_date, $end_date );
+		}
+		if ( null === $res_ary ) {
+			$table_name = 'view_pv';
+			$query      = 'SELECT pv_id,device_id,access_time,pv,version_id,is_raw_p,is_raw_c,is_raw_e,utm_medium,utm_source,source_domain,utm_campaign FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d and access_time between %s and %s';
+			$res_ary    = $qahm_db->get_results( $qahm_db->prepare( $query, $page_id, $start_date, $end_date ), ARRAY_A );
+		}
 		//$query      = 'SELECT pv_id,device_id,access_time,version_id,is_raw_p,is_raw_c,is_raw_e,utm_medium,utm_source,source_domain,utm_campaign FROM ' . $qahm_db->prefix . $table_name . ' WHERE page_id = %d';
 		//$res_ary    = $qahm_db->get_results( $qahm_db->prepare( $query, $page_id ), ARRAY_A, $tracking_id );
 		//$query      = 'SELECT pv_id,device_id,access_time,version_id,is_raw_p,is_raw_c,is_raw_e,utm_medium,utm_source,source_domain,utm_campaign FROM ' . $qahm_db->prefix . $table_name . ' WHERE version_id = %d';
 		//$res_ary    = $qahm_db->get_results( $qahm_db->prepare( $query, $version_id ), ARRAY_A, $tracking_id );
-
+		
 		if ( $res_ary ) {
-			foreach ( $res_ary as $pv ) {
+			foreach( $res_ary as $pv ) {
 				if ( $pv['access_time'] < $start_unixtime || $pv['access_time'] > $end_unixtime ) {
 					continue;
 				}
@@ -308,12 +476,9 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 		if ( $qa_pv_log ) {
 
-			usort(
-				$qa_pv_log,
-				function ( $a, $b ) {
-					return $a['access_time'] <=> $b['access_time'];
-				}
-			);
+			usort($qa_pv_log, function($a, $b) {
+				return $a['access_time'] <=> $b['access_time'];
+			});
 
 			// 100分率 + 精読率100%の分配列を用意
 			for ( $iii = 0; $iii < 100 + 1; $iii++ ) {
@@ -323,11 +488,11 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 			$total_stay_time = 0;
 			$merge_stay_num  = array();
 
-			$view_pv_dir = $this->get_data_dir_path( 'view' ) . $tracking_id . '/view_pv/';
-
+			$view_pv_dir   = $this->get_data_dir_path( 'view' ) . $tracking_id . '/view_pv/';
+			
 			$raw_p_filemap = $this->get_files_in_date_range( $view_pv_dir . 'raw_p/', $start_date, $end_date );
 			$raw_c_filemap = $this->get_files_in_date_range( $view_pv_dir . 'raw_c/', $start_date, $end_date );
-			$last_date     = null; // 前回処理した日付を追跡するための変数
+			$last_date = null; // 前回処理した日付を追跡するための変数
 
 			foreach ( $qa_pv_log as $pv_log ) {
 				$raw_p_tsv = null;
@@ -335,7 +500,7 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 				//QA ZERO
 				// $separate_merge_click_aryの作成
-				$utm_medium   = isset( $pv_log['utm_medium'] ) ? $pv_log['utm_medium'] : null;
+				$utm_medium   = isset($pv_log['utm_medium']) ? $pv_log['utm_medium'] : null;
 				$utm_source   = isset( $pv_log['utm_source'] ) ? $pv_log['utm_source'] : null;
 				$utm_campaign = isset( $pv_log['utm_campaign'] ) ? $pv_log['utm_campaign'] : null;
 
@@ -356,18 +521,21 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 				}
 
 				// pv_idが$goals_sessions_keys配列のキーに存在するかどうかを確認します。
-				if ( isset( $pv_log['pv_id'] ) && is_array( $goals_sessions_keys ) !== null ) {
-					$is_goal = $this->wrap_array_key_exists( $pv_log['pv_id'], $goals_sessions_keys ) ? '○' : '×';
+				if ( isset( $pv_log[ 'pv_id' ]) && is_array( $goals_sessions_keys ) !== null ) {
+					$is_goal = $this->wrap_array_key_exists($pv_log['pv_id'], $goals_sessions_keys) ? "○" : "×";
 				} else {
-					$is_goal = '(不明)';
+					$is_goal = "(不明)";
 				}
 
 				// キーを作成します。
-				$key = $utm_medium . '_' . $source_domain . '_' . $utm_campaign . '_' . $is_goal;
+				// #1512: 成分（utm 値・URL 断片等）に「_」や「=」が含まれると JS 側の split('_') が壊れるため、各成分をエンコードしてから連結する。
+				// 読み手は live-view.js（parseSeparateKey）と heatmap-bar.js（safeDecodeComponent）＝両方 decode して解釈する。
+				$key = self::encode_separate_key_component( $utm_medium ) . '_' . self::encode_separate_key_component( $source_domain ) . '_' . self::encode_separate_key_component( $utm_campaign ) . '_' . self::encode_separate_key_component( $is_goal );
 
-				if ( ! isset( $separate_merge_att_scr_ary_v2[ $key ] ) ) {
-					$separate_merge_att_scr_ary_v2[ $key ] = array();
-					$separate_total_stay_time[ $key ]      = 0;
+
+				if ( !isset( $separate_merge_att_scr_ary_v2[$key] ) ) {
+					$separate_merge_att_scr_ary_v2[$key] = array();
+					$separate_total_stay_time[$key] = 0;
 				}
 				//QA ZERO END
 
@@ -376,45 +544,45 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 					if ( $pv_log['is_raw_p'] || $pv_log['is_raw_c'] || $pv_log['is_raw_e'] ) {
 						$pv_id = $pv_log['pv_id'];
 						// 日付を取得し、ファイル名を特定
-						$current_date = $qahm_time->unixtime_to_str( $pv_log['access_time'], 'Y-m-d' );
+						$current_date = $qahm_time->unixtime_to_str( $pv_log['access_time'] , 'Y-m-d' );
 						if ( $last_date !== $current_date ) {
 							$last_date = $current_date; // 日付を更新
 							if ( isset( $raw_p_filemap[ $current_date ] ) ) {
-								$raw_p_file       = $raw_p_filemap[ $current_date ];
-								$raw_c_file       = $raw_c_filemap[ $current_date ];
-								$raw_p_data_ary   = $this->wrap_unserialize( $this->wrap_get_contents( $view_pv_dir . 'raw_p/' . $raw_p_file ) );
+								$raw_p_file = $raw_p_filemap[ $current_date ];
+								$raw_c_file = $raw_c_filemap[ $current_date ];
+								$raw_p_data_ary = $this->wrap_unserialize( $this->wrap_get_contents( $view_pv_dir . 'raw_p/' . $raw_p_file ) );
 								$raw_p_cached_ary = array();
 								foreach ( $raw_p_data_ary as $raw_p_data ) {
-									$raw_p_cached_ary[ $raw_p_data['pv_id'] ] = $raw_p_data['raw_p'];
+									$raw_p_cached_ary[$raw_p_data['pv_id']] = $raw_p_data['raw_p'];
 								}
-								$raw_c_data_ary   = $this->wrap_unserialize( $this->wrap_get_contents( $view_pv_dir . 'raw_c/' . $raw_c_file ) );
+								$raw_c_data_ary = $this->wrap_unserialize( $this->wrap_get_contents( $view_pv_dir . 'raw_c/' . $raw_c_file ) );
 								$raw_c_cached_ary = array();
 								foreach ( $raw_c_data_ary as $raw_c_data ) {
-									$raw_c_cached_ary[ $raw_c_data['pv_id'] ] = $raw_c_data['raw_c'];
+									$raw_c_cached_ary[$raw_c_data['pv_id']] = $raw_c_data['raw_c'];
 								}
 							} else {
 								continue;
 							}
 						}
 						if ( $pv_log['is_raw_p'] ) {
-							if ( isset( $raw_p_cached_ary[ $pv_id ] ) ) {
-								$raw_p_tsv = $raw_p_cached_ary[ $pv_id ];
+							if ( isset( $raw_p_cached_ary[$pv_id]) ) {
+								$raw_p_tsv = $raw_p_cached_ary[$pv_id];
 							}
 						}
 
 						if ( $pv_log['is_raw_c'] ) {
-							if ( isset( $raw_c_cached_ary[ $pv_id ] ) ) {
-								$raw_c_tsv = $raw_c_cached_ary[ $pv_id ];
+							if ( isset( $raw_c_cached_ary[$pv_id]) ) {
+								$raw_c_tsv = $raw_c_cached_ary[$pv_id];
 							}
 						}
 
 						if ( $raw_p_tsv || $raw_c_tsv ) {
-							++$data_num;
+							$data_num++;
 							//QA ZERO
-							if ( ! isset( $separate_data_num[ $key ] ) ) {
-								$separate_data_num[ $key ] = 0;
+							if ( !isset( $separate_data_num[$key] ) ) {
+								$separate_data_num[$key] = 0;
 							}
-							++$separate_data_num[ $key ];
+							$separate_data_num[$key]++;
 							//QA ZERO END
 						}
 					}
@@ -424,29 +592,34 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 						$raw_p_tsv = $pv_log['raw_p'];
 						$raw_c_tsv = $pv_log['raw_c'];
 
-						++$data_num;
+						$data_num++;
 						//QA ZERO
-						++$separate_data_num[ $key ];
+						$separate_data_num[$key]++;
 						//QA ZERO END
 					}
 				}
 
 				if ( $raw_p_tsv ) {
-					$raw_p_ary = $this->convert_tsv_to_array( $raw_p_tsv );
+					$raw_p_ary   = $this->convert_tsv_to_array( $raw_p_tsv );
 					//QA ZERO
-					$separate_exit_idx[ $key ] = -1;
-					$merge_exit_idx            = -1;
-					$raw_p_max                 = $this->wrap_count( $raw_p_ary );
+					$separate_exit_idx[$key] = -1;
+					$merge_exit_idx = -1;
+					$raw_p_max = $this->wrap_count($raw_p_ary);
 					//QA ZERO END
 					// 滞在時間
-					$ver = (int) $raw_p_ary[ self::DATA_COLUMN_HEADER ][ self::DATA_HEADER_VERSION ];
+					$ver = (int) $raw_p_ary[self::DATA_COLUMN_HEADER][self::DATA_HEADER_VERSION];
 					if ( $ver === 2 ) {
 						// 最大の滞在時間を取得
+						// ヘッダー行(index0)を除外し body 起点(DATA_COLUMN_BODY)で走査する。
+						// T108 で raw_p ヘッダーに is_submit(index1) が載ったため、全行 foreach だと
+						// ヘッダーの is_submit を phantom stay_time として拾う綻びが出る。直下の本描画
+						// ループ(:DATA_COLUMN_BODY 起点)と起点を揃えて header を body 集計から外す。
 						$max_stay_time = 0;
-						foreach ( $raw_p_ary as $p ) {
-							if ( isset( $p[ self::DATA_POS_2['STAY_TIME'] ] ) ) {
-								if ( $p[ self::DATA_POS_2['STAY_TIME'] ] > $max_stay_time ) {
-									$max_stay_time = $p[ self::DATA_POS_2['STAY_TIME'] ];
+						for ( $raw_p_idx = self::DATA_COLUMN_BODY; $raw_p_idx < $raw_p_max; $raw_p_idx++ ) {
+							$p = $raw_p_ary[$raw_p_idx];
+							if (isset ($p[self::DATA_POS_2['STAY_TIME']])) {
+								if ( $p[ self::DATA_POS_2[ 'STAY_TIME' ] ] > $max_stay_time ) {
+									$max_stay_time = $p[ self::DATA_POS_2[ 'STAY_TIME' ] ];
 								}
 							}
 						}
@@ -458,7 +631,7 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 						}
 						//1pvの滞在時間を全ポジションごとに処理する
 						for ( $raw_p_idx = self::DATA_COLUMN_BODY; $raw_p_idx < $raw_p_max; $raw_p_idx++ ) {
-							$p = $raw_p_ary[ $raw_p_idx ];
+							$p = $raw_p_ary[$raw_p_idx];
 							if ( ! isset( $p[ self::DATA_POS_2['STAY_HEIGHT'] ] ) ) {
 								break;
 							}
@@ -470,11 +643,11 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 							$stay_time = min( (int) $p[ self::DATA_POS_2['STAY_TIME'] ], self::ATTENTION_LIMIT_TIME );
 							// 滞在時間を熟読度に変換。センターに4/6、その前後に1/6ずつ割り振る（正規分布）
-							if ( $max_stay_time <= 2 ) {
+							if ($max_stay_time <= 2) {
 								// max_stay_timeが2秒以下の場合、reading_levelを固定値に設定
 								$reading_level = $stay_time == 2 ? 4 : 2;
 							} else {
-								$reading_level = ( $stay_time / $max_stay_time ) * self::MAX_READING_LEVEL;
+								$reading_level = ($stay_time / $max_stay_time) * self::MAX_READING_LEVEL;
 							}
 							//$merge_att_scr_ary_v2[STAY_HEIGHT]の中身
 							// STAY_HEIGHT：ユーザーが滞在したページの高さを示す値。100pxで割った値
@@ -490,19 +663,19 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 							// standard 用 STAY_NUM カウンタ（旧コードと等価な初期化値を維持）
 							if ( isset( $merge_stay_num[ $separate_merge_att_scr_idx ] ) ) {
-								++$merge_stay_num[ $separate_merge_att_scr_idx ];
+								$merge_stay_num[ $separate_merge_att_scr_idx ]++;
 							} else {
 								$merge_stay_num[ $separate_merge_att_scr_idx ] = self::FOUR_PER_SIX;
 							}
 							if ( $separate_merge_att_scr_idx - 1 >= 0 ) {
 								if ( isset( $merge_stay_num[ $separate_merge_att_scr_idx - 1 ] ) ) {
-									++$merge_stay_num[ $separate_merge_att_scr_idx - 1 ];
+									$merge_stay_num[ $separate_merge_att_scr_idx - 1 ]++;
 								} else {
 									$merge_stay_num[ $separate_merge_att_scr_idx - 1 ] = self::ONE_PER_SIX;
 								}
 							}
 							if ( isset( $merge_stay_num[ $separate_merge_att_scr_idx + 1 ] ) ) {
-								++$merge_stay_num[ $separate_merge_att_scr_idx + 1 ];
+								$merge_stay_num[ $separate_merge_att_scr_idx + 1 ]++;
 							} else {
 								$merge_stay_num[ $separate_merge_att_scr_idx + 1 ] = self::ONE_PER_SIX;
 							}
@@ -511,52 +684,53 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 							}
 
 							// 中心のインデックスに4/6を割り振る
-							if ( isset( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx ] ) ) {
-								$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ] += $reading_level * 4 / 6;
-								++$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ];
+							if ( isset( $separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx] ) ) {
+								$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx][self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME']] += $reading_level * 4 / 6;
+								$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx][self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM']]++;
 							} else {
-								$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx ] = array(
+								$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx] = array(
 									(int) $p[ self::DATA_POS_2['STAY_HEIGHT'] ],
 									$reading_level * self::FOUR_PER_SIX,
 									self::FOUR_PER_SIX,
-									0,
+									0
 								);
 							}
 
 							// 前後のインデックスが存在する場合、それぞれに1/6を割り振る
-							if ( $separate_merge_att_scr_idx - 1 >= 0 ) {
-								if ( isset( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx - 1 ] ) ) {
-									$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx - 1 ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ] += $reading_level * 1 / 6;
-									++$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx - 1 ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ];
+							if ($separate_merge_att_scr_idx - 1 >= 0) {
+								if ( isset ($separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx - 1] ) ) {
+									$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx - 1][self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME']] += $reading_level * 1 / 6;
+									$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx - 1][self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM']]++;
 								} else {
-									$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx - 1 ] = array(
+									$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx - 1] = array(
 										(int) $p[ self::DATA_POS_2['STAY_HEIGHT'] ] - 1,
 										$reading_level * self::ONE_PER_SIX,
 										self::ONE_PER_SIX,
-										0,
+										0
 									);
 								}
 							}
 
-							if ( isset( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx + 1 ] ) ) {
-								$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx + 1 ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ] += $reading_level * 1 / 6;
-								++$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx + 1 ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ];
+							if ( isset( $separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx + 1] ) ) {
+								$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx + 1][self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME']] += $reading_level * 1 / 6;
+								$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx + 1][self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM']]++;
 							} else {
-								$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_att_scr_idx + 1 ] = array(
+								$separate_merge_att_scr_ary_v2[$key][$separate_merge_att_scr_idx + 1] = array(
 									(int) $p[ self::DATA_POS_2['STAY_HEIGHT'] ] + 1,
 									$reading_level * self::ONE_PER_SIX,
 									self::ONE_PER_SIX,
-									0,
+									0
 								);
 							}
 							// 離脱位置を更新。既にソートされた配列なので比較の必要なし
-							if ( $separate_exit_idx[ $key ] < $separate_merge_att_scr_idx ) {
-								$separate_exit_idx[ $key ] = $separate_merge_att_scr_idx;
+							if ( $separate_exit_idx[$key] < $separate_merge_att_scr_idx ) {
+								$separate_exit_idx[$key] = $separate_merge_att_scr_idx;
 							}
 
 							// 合計滞在時間に加算
-							$separate_total_stay_time[ $key ] += $stay_time;
+							$separate_total_stay_time[$key] += $stay_time;
 							//QA ZERO END
+
 
 						}
 
@@ -570,49 +744,68 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 						// QA ZEROでもbody部が存在しなかったユーザーの対策。離脱位置を強制的に0の部分にする。
 						// これにより、ヒートマップビューのデータ数とスクロールマップトップのデータ数との見た目上の整合性を合わせる
-						if ( $separate_exit_idx[ $key ] === -1 ) {
+						if ( $separate_exit_idx[$key] === -1 ) {
 							$separate_exit_idx[ $key ] = 0;
 						}
-						if ( isset( $separate_merge_att_scr_ary_v2[ $key ][ $separate_exit_idx[ $key ] ] ) ) {
+						if ( isset( $separate_merge_att_scr_ary_v2[ $key ][ $separate_exit_idx[$key] ] ) ) {
 							// 離脱ユーザーの位置を増やす
-							++$separate_merge_att_scr_ary_v2[ $key ][ $separate_exit_idx[ $key ] ][ self::DATA_MERGE_ATTENTION_SCROLL_2['EXIT_NUM'] ];
+							$separate_merge_att_scr_ary_v2[ $key ][ $separate_exit_idx[$key] ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'EXIT_NUM' ] ]++;
 						} else {
 							// 離脱ユーザーの位置を新たに作成
-							$separate_merge_att_scr_ary_v2[ $key ][ $separate_exit_idx[ $key ] ] = array(
+							$separate_merge_att_scr_ary_v2[ $key ][ $separate_exit_idx[$key] ] = array(
 								0,
 								0,
 								1,
-								0,
+								0
 							);
 						}
 					}
 				}
 
-				if ( $raw_c_tsv && $base_selector_ary ) {
+				if ( $raw_c_tsv ) {
 					$raw_c_ary     = $this->convert_tsv_to_array( $raw_c_tsv );
-					$base_selector = $this->wrap_explode( "\t", $base_selector_ary );
+					$base_selector = $base_selector_ary ? $this->wrap_explode( "\t", $base_selector_ary ) : array();
 
 					foreach ( $raw_c_ary as $index => $c ) {
 						if ( $index === self::DATA_COLUMN_HEADER ) {
 							// header部。現在は何もしない
 						} else {
 							// body部
-							if ( ! isset( $c[ self::DATA_CLICK_1['SELECTOR_NAME'] ] ) || ! isset( $base_selector[ $c[ self::DATA_CLICK_1['SELECTOR_NAME'] ] ] ) ) {
+							if ( ! isset( $c[ self::DATA_CLICK_1['SELECTOR_NAME'] ] ) ) {
 								continue;
 							}
+							$selector_ref = $c[ self::DATA_CLICK_1['SELECTOR_NAME'] ];
+
+							// gXX形式（グローバルセレクタ辞書）か数値（旧base_selector）かで復元先を分岐
+							if ( $global_selectors && is_string( $selector_ref ) && 0 === strpos( $selector_ref, 'g' ) ) {
+								// Phase 1: gXX形式 → グローバルセレクタ辞書から復元
+								$selector_id     = (int) substr( $selector_ref, 1 );
+								$selector_string = $global_selectors->get_selector_string( $selector_id );
+								if ( null === $selector_string ) {
+									continue;
+								}
+							} else {
+								// 旧形式: 数値インデックス → base_selectorから復元
+								if ( ! isset( $base_selector[ $selector_ref ] ) ) {
+									continue;
+								}
+								$selector_string = $base_selector[ $selector_ref ];
+							}
+
 							//QA ZERO
-							if ( ! isset( $separate_merge_click_ary[ $key ] ) ) {
+							if (  ! isset( $separate_merge_click_ary[$key] ) ) {
 								$separate_merge_click_ary[ $key ] = array();
 							}
-							$separate_merge_click_ary[ $key ][] = array(
-								self::DATA_MERGE_CLICK_1['SELECTOR_NAME'] => $base_selector[ $c[ self::DATA_CLICK_1['SELECTOR_NAME'] ] ],
+							$separate_merge_click_ary[$key][] = array(
+								self::DATA_MERGE_CLICK_1['SELECTOR_NAME'] => $selector_string,
 								self::DATA_MERGE_CLICK_1['SELECTOR_X'] => $c[ self::DATA_CLICK_1['SELECTOR_X'] ],
-								self::DATA_MERGE_CLICK_1['SELECTOR_Y'] => $c[ self::DATA_CLICK_1['SELECTOR_Y'] ],
+								self::DATA_MERGE_CLICK_1['SELECTOR_Y'] => $c[ self::DATA_CLICK_1['SELECTOR_Y'] ]
 							);
 							//QA ZERO END
 						}
 					}
 				}
+
 			}
 
 			// separate 配列から standard の merge 配列を導出（改善A: ループ内の重複計算を排除）
@@ -654,30 +847,30 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 			$merge_max = $this->wrap_count( $merge_att_scr_ary_v2 );
 			if ( $merge_max > 0 ) {
 				for ( $merge_idx = 0; $merge_idx < $merge_max; $merge_idx++ ) {
-					if ( isset( $merge_att_scr_ary_v2[ $merge_idx ] ) && isset( $merge_att_scr_ary_v2[ $merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ] ) && $merge_att_scr_ary_v2[ $merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ] > 1 ) {
-						$merge_att_scr_ary_v2[ $merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ] /= $merge_att_scr_ary_v2[ $merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ];
-						$merge_att_scr_ary_v2[ $merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ]  = round( $merge_att_scr_ary_v2[ $merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ], 3 );
+					if ( isset($merge_att_scr_ary_v2[$merge_idx]) && isset($merge_att_scr_ary_v2[$merge_idx][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ]) && $merge_att_scr_ary_v2[$merge_idx][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ] > 1 ) {
+						$merge_att_scr_ary_v2[$merge_idx][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ] /= $merge_att_scr_ary_v2[$merge_idx][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ];
+						$merge_att_scr_ary_v2[$merge_idx][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ]  = round( $merge_att_scr_ary_v2[$merge_idx][ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ], 3 );
 					}
 				}
 			}
 			//QA ZERO
 			//separateはサーバー側では平均せず、クライアント側で自由に合算し、平均を求める。
-			//          foreach ( $separate_merge_att_scr_ary_v2 as $key => $value ) {
-			//              if ( $separate_data_num[ $key ] > 0 ) {
-			//                  $separate_time_on_page[ $key ] = round( $separate_total_stay_time[ $key ] / $separate_data_num[ $key ], 2 );
-			//              }
-			//              // 合算したデータの平均値を求める
-			//
-			//              $separate_merge_max = $this->wrap_count( $separate_merge_att_scr_ary_v2[ $key ] );
-			//              if ( $separate_merge_max > 0 ) {
-			//                  for ( $separate_merge_idx = 0; $separate_merge_idx < $separate_merge_max; $separate_merge_idx++ ) {
-			//                      if ( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_NUM' ] ] > 1 ) {
-			//                          $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_TIME' ] ] /= $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_NUM' ] ];
-			//                          $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_TIME' ] ] = round( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_TIME' ] ], 3 );
-			//                      }
-			//                  }
-			//              }
-			//          }
+//			foreach ( $separate_merge_att_scr_ary_v2 as $key => $value ) {
+//				if ( $separate_data_num[ $key ] > 0 ) {
+//					$separate_time_on_page[ $key ] = round( $separate_total_stay_time[ $key ] / $separate_data_num[ $key ], 2 );
+//				}
+//				// 合算したデータの平均値を求める
+//
+//				$separate_merge_max = $this->wrap_count( $separate_merge_att_scr_ary_v2[ $key ] );
+//				if ( $separate_merge_max > 0 ) {
+//					for ( $separate_merge_idx = 0; $separate_merge_idx < $separate_merge_max; $separate_merge_idx++ ) {
+//						if ( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_NUM' ] ] > 1 ) {
+//							$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_TIME' ] ] /= $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_NUM' ] ];
+//							$separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_TIME' ] ] = round( $separate_merge_att_scr_ary_v2[ $key ][ $separate_merge_idx ][ self::DATA_MERGE_ATTENTION_SCROLL_2[ 'STAY_TIME' ] ], 3 );
+//						}
+//					}
+//				}
+//			}
 
 			//QA ZERO END
 		}
@@ -685,8 +878,8 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		// dbにbase_htmlが存在しない場合は作る
 		if ( ! $base_html ) {
 			$http_response_header = null;
-			$response             = $this->wrap_remote_get( $base_url, $device_name );
-			$response_code        = isset( $response['response']['code'] ) ? intval( $response['response']['code'] ) : 0;
+			$response = $this->wrap_remote_get( $base_url, $device_name );
+			$response_code = isset( $response['response']['code'] ) ? intval( $response['response']['code'] ) : 0;
 			if ( is_wp_error( $response ) ) {
 				throw new Exception( 'wp_remote_get failed.' );
 			}
@@ -706,39 +899,39 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		// baseが存在した場合、cap.phpを作成する
 		if ( $base_html ) {
 			// capはbaseを加工
-			$cap_path = $heatmap_view_work_dir . $file_base_name . '-cap.php';
+			$cap_path    = $heatmap_view_work_dir . $file_base_name . '-cap.php';
 			//$cap_content = $this->opt_html( $cap_path, $base_html, $type, $id, $ver, $device_name );
 			$cap_content = $this->opt_base_html( $cap_path, $base_html, $base_url, $device_name );
 
 			if ( $cap_content ) {
 				// cap
 				$wp_filesystem->put_contents( $cap_path, $cap_content );
-
+				
 				// マージファイル
 				if ( $merge_att_scr_ary_v2 ) {
 					// ソート後、tsvに変換して保存
 					$sort_ary = array();
 					foreach ( $merge_att_scr_ary_v2 as $val_idx => $val_ary ) {
-						$sort_ary[ $val_idx ] = $val_ary[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_HEIGHT'] ];
+						$sort_ary[$val_idx] = $val_ary[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_HEIGHT'] ];
 					}
 					array_multisort( $sort_ary, SORT_ASC, $merge_att_scr_ary_v2 );
-					$head                 = array(
+					$head = array(
 						array(
 							self::DATA_HEADER_VERSION => 2,
-						),
+						)
 					);
 					$merge_att_scr_ary_v2 = $this->wrap_array_merge( $head, $merge_att_scr_ary_v2 );
-					$merge_att_scr_tsv    = $this->convert_array_to_tsv( $merge_att_scr_ary_v2 );
+					$merge_att_scr_tsv = $this->convert_array_to_tsv( $merge_att_scr_ary_v2 );
 
 					$path = $heatmap_view_work_dir . $file_base_name . '-merge-as-v2.php';
 					$this->wrap_put_contents( $path, $merge_att_scr_tsv );
 				}
 
 				if ( $merge_click_ary ) {
-					$head            = array(
+					$head = array(
 						array(
 							self::DATA_HEADER_VERSION => 1,
-						),
+						)
 					);
 					$merge_click_ary = $this->wrap_array_merge( $head, $merge_click_ary );
 					$merge_click_tsv = $this->convert_array_to_tsv( $merge_click_ary );
@@ -750,29 +943,29 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 				// Separate マージファイル
 				if ( $separate_merge_att_scr_ary_v2 ) {
 					//各キーごとにソート
-					foreach ( $separate_merge_att_scr_ary_v2 as $key => &$array ) {
-						ksort( $array );
+					foreach ($separate_merge_att_scr_ary_v2 as $key => &$array) {
+						ksort($array);
 					}
-					unset( $array ); // remove reference
+					unset($array); // remove reference
 
 					//ヘッダー付与
-					$head                          = array(
+					$head = array(
 						array(
 							self::DATA_HEADER_VERSION => 2,
-						),
+						)
 					);
 					$separate_merge_att_scr_ary_v2 = $this->wrap_array_merge( $head, $separate_merge_att_scr_ary_v2 );
-					$separate_merge_att_scr_slz    = $this->wrap_serialize( $separate_merge_att_scr_ary_v2 );
+					$separate_merge_att_scr_slz = $this->wrap_serialize( $separate_merge_att_scr_ary_v2 );
 
 					$path = $heatmap_view_work_dir . $file_base_name . '-separate-merge-as-v2-slz.php';
 					$this->wrap_put_contents( $path, $separate_merge_att_scr_slz );
 				}
 
 				if ( $separate_merge_click_ary ) {
-					$head                     = array(
+					$head = array(
 						array(
 							self::DATA_HEADER_VERSION => 1,
-						),
+						)
 					);
 					$separate_merge_click_ary = $this->wrap_array_merge( $head, $separate_merge_click_ary );
 					$separate_merge_click_tsv = $this->wrap_serialize( $separate_merge_click_ary );
@@ -781,6 +974,7 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 					$this->wrap_put_contents( $path, $separate_merge_click_tsv );
 				}
 				//QA ZERO END
+
 
 				// 情報を格納するinfoファイル
 				// iniファイルと同じような書き方。シンプルにしたいが為にセクションは無し
@@ -836,28 +1030,28 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	 */
 	private function get_files_in_date_range( $dir, $start_date, $end_date ) {
 		static $cache = array();
-		$cache_key    = $dir . '_' . $start_date . '_' . $end_date;
-
-		if ( isset( $cache[ $cache_key ] ) ) {
-			return $cache[ $cache_key ];
+		$cache_key = $dir . '_' . $start_date . '_' . $end_date;
+		
+		if ( isset( $cache[$cache_key] ) ) {
+			return $cache[$cache_key];
 		}
-
+		
 		$dirlist = $this->wrap_dirlist( $dir );
 		if ( ! $dirlist ) {
-			$cache[ $cache_key ] = array();
+			$cache[$cache_key] = array();
 			return array();
 		}
-
+		
 		$file_mapping = $this->file_mapping_cache( $dirlist );
-
+		
 		$filtered_files = array();
 		foreach ( $file_mapping as $date => $filename ) {
 			if ( $date >= $start_date && $date <= $end_date ) {
-				$filtered_files[ $date ] = $filename;
+				$filtered_files[$date] = $filename;
 			}
 		}
-
-		$cache[ $cache_key ] = $filtered_files;
+		
+		$cache[$cache_key] = $filtered_files;
 		return $filtered_files;
 	}
 
@@ -867,13 +1061,13 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	private function file_mapping_cache( $dirlist ) {
 		$file_mapping_cache = array();
 		foreach ( $dirlist as $file_info ) {
-			if ( preg_match( '/^(\d{4}-\d{2}-\d{2})_/', $file_info['name'], $matches ) ) {
+			if ( preg_match('/^(\d{4}-\d{2}-\d{2})_/', $file_info['name'], $matches ) ) {
 				// ファイル名から日付を抽出
 				$file_date = $matches[1];
 
 				// 日付が $date と一致する場合、ファイルマッピングキャッシュに追加
 				if ( $file_date ) {
-					$file_mapping_cache[ $file_date ] = $file_info['name'];
+					$file_mapping_cache[$file_date] = $file_info['name'];
 				}
 			}
 		}
@@ -884,7 +1078,7 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	public function get_html_bar_text( $id, $html, $tooltip, $both = false, $link = '' ) {
 		$clear_both = '';
 		if ( $both ) {
-			$clear_both = ' style="clear: both;"';
+			$clear_both = ' style="clear: both;"'; 
 		}
 		$link_start = '';
 		$link_end   = '';
@@ -894,15 +1088,15 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		}
 
 		$element_name = str_replace( 'heatmap-bar-', '', $id );
-		$bem_class    = 'heatmap-bar__item heatmap-bar__item--' . $element_name;
+		$bem_class = 'heatmap-bar__item heatmap-bar__item--' . $element_name;
 
 		return '<li class="' . $bem_class . '" data-id="' . $id . '"' . $clear_both . '>' .
-				$link_start .
-				'<span class="qahm-tooltip-bottom" data-qahm-tooltip="' . $tooltip . '">' .
-				$html .
-				'</span>' .
-				$link_end .
-				'</li>';
+			   $link_start .
+			   '<span class="qahm-tooltip-bottom" data-qahm-tooltip="' . $tooltip . '">' .
+			   $html .
+			   '</span>' .
+			   $link_end .
+			   '</li>';
 	}
 
 	public function get_html_bar_checkbox( $id, $html, $tooltip, $is_check ) {
@@ -912,16 +1106,16 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		}
 
 		$element_name = str_replace( 'heatmap-bar-', '', $id );
-		$bem_class    = 'heatmap-bar__item heatmap-bar__item--checkbox heatmap-bar__item--' . $element_name;
+		$bem_class = 'heatmap-bar__item heatmap-bar__item--checkbox heatmap-bar__item--' . $element_name;
 
 		return '<li class="' . $bem_class . '" data-id="' . $id . '">' .
-				'<label class="heatmap-bar__checkbox-label">' .
-				'<span class="qahm-tooltip-bottom" data-qahm-tooltip="' . $tooltip . '">' .
-				'<input class="heatmap-bar__checkbox-input ' . $id . '" type="checkbox"' . $check_html . ' disabled>' .
-				$html .
-				'</span>' .
-				'</label>' .
-				'</li>';
+			   '<label class="heatmap-bar__checkbox-label">' .
+			   '<span class="qahm-tooltip-bottom" data-qahm-tooltip="' . $tooltip . '">' .
+			   '<input class="heatmap-bar__checkbox-input ' . $id . '" type="checkbox"' . $check_html . ' disabled>' .
+			   $html .
+			   '</span>' .
+			   '</label>' .
+			   '</li>';
 	}
 
 	// ヒートマップ表示画面上で必要な初期情報を取得
@@ -930,25 +1124,25 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 		global $wp_filesystem;
 
-		$type           = $this->wrap_filter_input( INPUT_POST, 'type' );
-		$id             = $this->wrap_filter_input( INPUT_POST, 'id' );
-		$ver            = $this->wrap_filter_input( INPUT_POST, 'ver' );
-		$dev            = $this->wrap_filter_input( INPUT_POST, 'dev' );
+		$type      = $this->wrap_filter_input( INPUT_POST, 'type' );
+		$id        = $this->wrap_filter_input( INPUT_POST, 'id' );
+		$ver       = $this->wrap_filter_input( INPUT_POST, 'ver' );
+		$dev       = $this->wrap_filter_input( INPUT_POST, 'dev' );
 		$file_base_name = $this->wrap_filter_input( INPUT_POST, 'file_base_name' );
 
 		// cap.phpは一日ごとの更新のため、リアルタイムに変わってほしい変数や
 		// QAHMバーを初期化する際に必須の情報を受け取る
-		$data['debug_level']   = QAHM_DEBUG_LEVEL;
-		$data['debug']         = QAHM_DEBUG;
-		$data['type']          = QAHM_TYPE;
-		$data['type_zero']     = QAHM_TYPE_ZERO;
-		$data['type_wp']       = QAHM_TYPE_WP;
-		$data['locale']        = get_locale();
-		$data['data_num']      = 0;            // データ数はcap.phpに移動予定
-		$data['ver_max']       = 1;             // 後々修正 imai
-		$data['heatmap']       = false;
-		$data['attention']     = false;
-		$data['free_rec_flag'] = false;
+		$data['debug_level'] = QAHM_DEBUG_LEVEL;
+		$data['debug']       = QAHM_DEBUG;
+		$data['type']        = QAHM_TYPE;
+		$data['type_zero']   = QAHM_TYPE_ZERO;
+		$data['type_wp']     = QAHM_TYPE_WP;
+		$data['locale']            = get_locale();
+		$data['data_num']          = 0;            // データ数はcap.phpに移動予定
+		$data['ver_max']           = 1;				// 後々修正 imai
+		$data['heatmap']           = false;
+		$data['attention']         = false;
+		$data['free_rec_flag']     = false;
 
 		$heatmap_view_work_dir = $this->get_data_dir_path( 'heatmap-view-work' );
 
@@ -959,7 +1153,8 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		// infoファイルの読み込み
 		$info_ary = $wp_filesystem->get_contents_array( $heatmap_view_work_dir . $file_base_name . '-info.php' );
 		foreach ( $info_ary as $info ) {
-			$info_param = $this->wrap_explode( '=', $info );
+			// #1512: 値（separate_data_num の JSON 等）に「=」が含まれても行が捨てられないよう、最初の「=」でのみ分割する
+			$info_param = $this->wrap_explode( '=', $info, 2 );
 			if ( $this->wrap_count( $info_param ) === 2 ) {
 				switch ( $info_param[0] ) {
 					case 'data_num':
@@ -968,6 +1163,7 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 				}
 			}
 		}
+
 
 		$lists = $this->wrap_dirlist( $heatmap_view_work_dir );
 		foreach ( $lists as $list ) {
@@ -1033,7 +1229,7 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 			}
 		}
 
-		//ブラウザ側でマージデータのフォーマットを知るために必要
+ 		//ブラウザ側でマージデータのフォーマットを知るために必要
 		$data['DATA_HEATMAP_SELECTOR_NAME'] = self::DATA_MERGE_CLICK_1['SELECTOR_NAME'];
 		$data['DATA_HEATMAP_SELECTOR_X']    = self::DATA_MERGE_CLICK_1['SELECTOR_X'];
 		$data['DATA_HEATMAP_SELECTOR_Y']    = self::DATA_MERGE_CLICK_1['SELECTOR_Y'];
@@ -1042,110 +1238,91 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		$data['DATA_ATTENTION_SCROLL_STAY_TIME_V1'] = self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_TIME'];
 		$data['DATA_ATTENTION_SCROLL_STAY_NUM_V1']  = self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_NUM'];
 		$data['DATA_ATTENTION_SCROLL_EXIT_NUM_V1']  = self::DATA_MERGE_ATTENTION_SCROLL_1['EXIT_NUM'];
-
+		
 		$data['DATA_ATTENTION_SCROLL_STAY_HEIGHT_V2'] = self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_HEIGHT'];
 		$data['DATA_ATTENTION_SCROLL_STAY_TIME_V2']   = self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'];
 		$data['DATA_ATTENTION_SCROLL_STAY_NUM_V2']    = self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'];
 		$data['DATA_ATTENTION_SCROLL_EXIT_NUM_V2']    = self::DATA_MERGE_ATTENTION_SCROLL_2['EXIT_NUM'];
 
 	// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
-		echo $this->wrap_json_encode( $data );
-		die();
-	}
+	echo $this->wrap_json_encode( $data );
+	die();
+}
 
-	/**
-	 * ページバージョンを手動で更新するAJAXメソッド
-	 *
-	 * 指定されたpage_idに対して、全デバイス分のバージョンを更新する
-	 */
-	public function ajax_update_page_version() {
-		global $qahm_log;
-		global $wpdb;
-
-		try {
-			$page_id = (int) $this->wrap_filter_input( INPUT_POST, 'page_id' );
-
-			if ( ! $page_id ) {
-				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
-				echo $this->wrap_json_encode(
-					array(
-						'success' => false,
-						'message' => esc_html__( 'page_idが必要です', 'qa-heatmap-analytics' ),
-					)
-				);
-				die();
-			}
-
-			$version_manager = new QAHM_Version_Manager();
-
-			// page_idからURLを取得
-			$table_name = $wpdb->prefix . 'qa_pages';
-			$query      = 'SELECT url FROM ' . $table_name . ' WHERE page_id = %d';
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- This SQL query uses placeholders and $wpdb->prepare(), but it may trigger warnings due to the dynamic construction of the SQL string. Direct database call is necessary in this case due to the complexity of the SQL query. Caching would not provide significant performance benefits in this context.
-			$qa_pages = $wpdb->get_results( $wpdb->prepare( $query, $page_id ), ARRAY_A );
-
-			if ( ! $qa_pages || empty( $qa_pages[0]['url'] ) ) {
-				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
-				echo $this->wrap_json_encode(
-					array(
-						'success' => false,
-						'message' => esc_html__( 'URLの取得に失敗しました', 'qa-heatmap-analytics' ),
-					)
-				);
-				die();
-			}
-
-			$url = $qa_pages[0]['url'];
-
-			$device_ids   = array_column( QAHM_DEVICES, 'id' );
-			$device_names = array_column( QAHM_DEVICES, 'name' );
-			$devices_map  = array_combine( $device_ids, $device_names );
-
-			$results = array();
-			foreach ( $devices_map as $device_id => $device_name ) {
-				$base_html = $version_manager->curl_get( $url, 10, 10, $device_name );
-
-				if ( $base_html ) {
-					$new_version             = $version_manager->refresh_version_for_dev( $page_id, $device_id, $base_html );
-					$results[ $device_name ] = $new_version ? $new_version : false;
-				} else {
-					$results[ $device_name ] = false;
-				}
-
-				usleep( 500000 ); // 0.5秒待機
-			}
-
+/**
+ * ページバージョンを手動で更新するAJAXメソッド
+ * 
+ * 指定されたpage_idに対して、全デバイス分のバージョンを更新する
+ */
+public function ajax_update_page_version() {
+	global $qahm_log;
+	global $wpdb;
+	
+	try {
+		$page_id = (int) $this->wrap_filter_input( INPUT_POST, 'page_id' );
+		
+		if (!$page_id) {
 			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
-			echo $this->wrap_json_encode(
-				array(
-					'success' => true,
-					'results' => $results, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Array of internal version data, properly encoded by wrap_json_encode().
-				)
-			);
-
-		} catch ( Exception $e ) {
-			$qahm_log->error( $e->getMessage() );
-			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
-			echo $this->wrap_json_encode(
-				array(
-					'success' => false,
-					'message' => esc_html( $e->getMessage() ),
-				)
-			);
-		} finally {
+			echo $this->wrap_json_encode( array( 'success' => false, 'message' => __( 'page_id is required.', 'qa-heatmap-analytics' ) ) );
 			die();
 		}
+		
+		$version_manager = new QAHM_Version_Manager();
+		
+		// page_idからURLを取得
+		$table_name = $wpdb->prefix . 'qa_pages';
+		$query = "SELECT url FROM " . $table_name . " WHERE page_id = %d";
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- This SQL query uses placeholders and $wpdb->prepare(), but it may trigger warnings due to the dynamic construction of the SQL string. Direct database call is necessary in this case due to the complexity of the SQL query. Caching would not provide significant performance benefits in this context.
+		$qa_pages = $wpdb->get_results($wpdb->prepare($query, $page_id), ARRAY_A);
+		
+		if (!$qa_pages || empty($qa_pages[0]['url'])) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
+			echo $this->wrap_json_encode( array( 'success' => false, 'message' => __( 'Failed to get the URL.', 'qa-heatmap-analytics' ) ) );
+			die();
+		}
+		
+		$url = $qa_pages[0]['url'];
+		
+		$device_ids = array_column(QAHM_DEVICES, 'id');
+		$device_names = array_column(QAHM_DEVICES, 'name');
+		$devices_map = array_combine($device_ids, $device_names);
+		
+		$results = [];
+		foreach ($devices_map as $device_id => $device_name) {
+			$base_html = $version_manager->curl_get($url, 10, 10, $device_name);
+			
+			if ($base_html) {
+				$new_version = $version_manager->refresh_version_for_dev($page_id, $device_id, $base_html);
+				$results[$device_name] = $new_version ? $new_version : false;
+			} else {
+				$results[$device_name] = false;
+			}
+			
+			usleep(500000); // 0.5秒待機
+		}
+		
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
+		echo $this->wrap_json_encode(['success' => true, 'results' => $results]);
+		
+	} catch (Exception $e) {
+		$qahm_log->error($e->getMessage());
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
+		echo $this->wrap_json_encode(['success' => false, 'message' => $e->getMessage()]);
+	} finally {
+		die();
 	}
+}
 
-	//QA ZERO
-	public function ajax_get_separate_data() {
+//QA ZERO
+public function ajax_get_separate_data()	{
 		// Check nonce, authentication, or any other necessary verification here.
 
 		// Get the version_id from the request.
 		$file_base_name = $this->wrap_filter_input( INPUT_POST, 'file_base_name' );
-		$data           = $this->get_separate_data( $file_base_name );
+		$data = $this->get_separate_data( $file_base_name );
 		// Return the data as JSON.
 		wp_send_json( $data );
+
 	}
 
 	public function get_separate_data( $file_base_name ) {
@@ -1154,12 +1331,12 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 		// Initialize the data array.
 		$data = array(
-			'merge_c'  => null,
+			'merge_c' => null,
 			'merge_as' => null,
 		);
 
 		// Define the file paths.
-		$merge_c_file  = $heatmap_view_work_dir . $file_base_name . '-separate-merge-c-slz.php';
+		$merge_c_file = $heatmap_view_work_dir . $file_base_name . '-separate-merge-c-slz.php';
 		$merge_as_file = $heatmap_view_work_dir . $file_base_name . '-separate-merge-as-v2-slz.php';
 
 		// Check if the files exist and read the data from the files.
@@ -1181,5 +1358,169 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 		return $data;
 	}
+	/**
+	 * Create a one-time token for live heatmap view.
+	 *
+	 * @return void
+	 */
+	public function ajax_create_live_view_token() {
+		check_ajax_referer( 'qahm_ajax_create_live_view_token' );
+
+		if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+			wp_send_json_error( 'Unauthorized' );
+		}
+
+		$file_base_name = isset( $_POST['file_base_name'] ) ? sanitize_text_field( wp_unslash( $_POST['file_base_name'] ) ) : '';
+		$page_url = isset( $_POST['page_url'] ) ? esc_url_raw( wp_unslash( $_POST['page_url'] ) ) : '';
+
+		if ( empty( $file_base_name ) || empty( $page_url ) ) {
+			wp_send_json_error( 'Missing parameters' );
+		}
+
+		if ( preg_match( '/[\/\\]|\.\.\.?/', $file_base_name ) ) {
+			wp_send_json_error( 'Invalid file_base_name' );
+		}
+
+		$heatmap_view_work_dir = $this->get_data_dir_path( 'heatmap-view-work' );
+		$info_file = $heatmap_view_work_dir . $file_base_name . '-info.php';
+		if ( ! file_exists( $info_file ) ) {
+			wp_send_json_error( 'Data not found' );
+		}
+
+		$token = 'lv_' . bin2hex( random_bytes( 16 ) );
+		$token_data = array(
+			'file_base_name' => $file_base_name,
+			'page_url'       => $page_url,
+			'created_at'     => time(),
+		);
+
+		set_transient( 'qa_live_view_' . $token, $token_data, 300 );
+
+		$live_view_url = add_query_arg( 'qa_lv', $token, $page_url );
+		wp_send_json_success( array(
+			'token'         => $token,
+			'expires_at'    => time() + 300,
+			'live_view_url' => $live_view_url,
+		) );
+	}
+
+	public function load_live_view_data( $token ) {
+		global $wp_filesystem;
+
+		$token_data = get_transient( 'qa_live_view_' . $token );
+		if ( ! $token_data ) {
+			return null;
+		}
+
+		delete_transient( 'qa_live_view_' . $token );
+
+		$file_base_name = $token_data['file_base_name'];
+		$heatmap_view_work_dir = $this->get_data_dir_path( 'heatmap-view-work' );
+
+		$data = array();
+		$data['merge_c']     = null;
+		$data['merge_as_v2'] = null;
+		$data['merge_as_v1'] = null;
+		$data['data_num']    = 0;
+		$data['separate_data_num']         = null;
+		$data['separate_total_stay_time']   = null;
+
+		$info_file = $heatmap_view_work_dir . $file_base_name . '-info.php';
+		if ( ! file_exists( $info_file ) ) {
+			return null;
+		}
+
+		$info_ary = $wp_filesystem->get_contents_array( $info_file );
+		if ( $info_ary ) {
+			foreach ( $info_ary as $info ) {
+				// #1512: 値（separate_data_num の JSON 等）に「=」が含まれても行が捨てられないよう、最初の「=」でのみ分割する
+				$info_param = $this->wrap_explode( '=', $info, 2 );
+				if ( $this->wrap_count( $info_param ) === 2 ) {
+					if ( $info_param[0] === 'data_num' ) {
+						$data['data_num'] = (int) $info_param[1];
+					} elseif ( $info_param[0] === 'separate_data_num' ) {
+						$data['separate_data_num'] = json_decode( trim( $info_param[1] ), true );
+					} elseif ( $info_param[0] === 'separate_total_stay_time' ) {
+						$data['separate_total_stay_time'] = json_decode( trim( $info_param[1] ), true );
+					}
+				}
+			}
+		}
+
+		$merge_c_file = $heatmap_view_work_dir . $file_base_name . '-merge-c.php';
+		if ( file_exists( $merge_c_file ) ) {
+			$merge_c_str = $this->wrap_get_contents( $merge_c_file );
+			if ( $merge_c_str ) {
+				$merge_c_ary = $this->convert_tsv_to_array( $merge_c_str );
+				unset( $merge_c_ary[ self::DATA_COLUMN_HEADER ] );
+				$merge_c_ary = array_values( $merge_c_ary );
+				foreach ( $merge_c_ary as &$merge_c ) {
+					$merge_c[ self::DATA_MERGE_CLICK_1['SELECTOR_X'] ] = (int) $merge_c[ self::DATA_MERGE_CLICK_1['SELECTOR_X'] ];
+					$merge_c[ self::DATA_MERGE_CLICK_1['SELECTOR_Y'] ] = (int) $merge_c[ self::DATA_MERGE_CLICK_1['SELECTOR_Y'] ];
+				}
+				unset( $merge_c );
+				$data['merge_c'] = $merge_c_ary;
+			}
+		}
+
+		$merge_as_v2_file = $heatmap_view_work_dir . $file_base_name . '-merge-as-v2.php';
+		if ( file_exists( $merge_as_v2_file ) ) {
+			$merge_as_str = $this->wrap_get_contents( $merge_as_v2_file );
+			if ( $merge_as_str ) {
+				$merge_as_ary = $this->convert_tsv_to_array( $merge_as_str );
+				unset( $merge_as_ary[ self::DATA_COLUMN_HEADER ] );
+				$merge_as_ary = array_values( $merge_as_ary );
+				foreach ( $merge_as_ary as &$merge_as ) {
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_HEIGHT'] ] = (int) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_HEIGHT'] ];
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ]   = (float) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'] ];
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ]    = (int) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'] ];
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['EXIT_NUM'] ]    = (int) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_2['EXIT_NUM'] ];
+				}
+				unset( $merge_as );
+				$data['merge_as_v2'] = $merge_as_ary;
+			}
+		}
+
+		$merge_as_v1_file = $heatmap_view_work_dir . $file_base_name . '-merge-as-v1.php';
+		if ( file_exists( $merge_as_v1_file ) ) {
+			$merge_as_str = $this->wrap_get_contents( $merge_as_v1_file );
+			if ( $merge_as_str ) {
+				$merge_as_ary = $this->convert_tsv_to_array( $merge_as_str );
+				unset( $merge_as_ary[ self::DATA_COLUMN_HEADER ] );
+				$merge_as_ary = array_values( $merge_as_ary );
+				foreach ( $merge_as_ary as &$merge_as ) {
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['PERCENT'] ]   = (int) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['PERCENT'] ];
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_TIME'] ] = (float) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_TIME'] ];
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_NUM'] ]  = (int) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_NUM'] ];
+					$merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['EXIT_NUM'] ]  = (int) $merge_as[ self::DATA_MERGE_ATTENTION_SCROLL_1['EXIT_NUM'] ];
+				}
+				unset( $merge_as );
+				$data['merge_as_v1'] = $merge_as_ary;
+			}
+		}
+
+		$separate_data = $this->get_separate_data( $file_base_name );
+		$data['separate_merge_c']  = $separate_data['merge_c'];
+		$data['separate_merge_as'] = $separate_data['merge_as'];
+
+		$data['DATA_HEATMAP_SELECTOR_NAME'] = self::DATA_MERGE_CLICK_1['SELECTOR_NAME'];
+		$data['DATA_HEATMAP_SELECTOR_X']    = self::DATA_MERGE_CLICK_1['SELECTOR_X'];
+		$data['DATA_HEATMAP_SELECTOR_Y']    = self::DATA_MERGE_CLICK_1['SELECTOR_Y'];
+
+		$data['DATA_ATTENTION_SCROLL_PERCENT_V1']   = self::DATA_MERGE_ATTENTION_SCROLL_1['PERCENT'];
+		$data['DATA_ATTENTION_SCROLL_STAY_TIME_V1'] = self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_TIME'];
+		$data['DATA_ATTENTION_SCROLL_STAY_NUM_V1']  = self::DATA_MERGE_ATTENTION_SCROLL_1['STAY_NUM'];
+		$data['DATA_ATTENTION_SCROLL_EXIT_NUM_V1']  = self::DATA_MERGE_ATTENTION_SCROLL_1['EXIT_NUM'];
+
+		$data['DATA_ATTENTION_SCROLL_STAY_HEIGHT_V2'] = self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_HEIGHT'];
+		$data['DATA_ATTENTION_SCROLL_STAY_TIME_V2']   = self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_TIME'];
+		$data['DATA_ATTENTION_SCROLL_STAY_NUM_V2']    = self::DATA_MERGE_ATTENTION_SCROLL_2['STAY_NUM'];
+		$data['DATA_ATTENTION_SCROLL_EXIT_NUM_V2']    = self::DATA_MERGE_ATTENTION_SCROLL_2['EXIT_NUM'];
+
+		$data['_token_page_url'] = isset( $token_data['page_url'] ) ? $token_data['page_url'] : '';
+
+		return $data;
+	}
+
 	//QA ZERO END
 }

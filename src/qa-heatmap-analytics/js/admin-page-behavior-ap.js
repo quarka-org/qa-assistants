@@ -18,10 +18,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'page_visit_num', label: qahml10n['table_page_visit_num'], width: 8, type: 'integer' },
 		{ key: 'page_avg_stay_time', label: qahml10n['table_page_avg_stay_time'], width: 8, type: 'duration' },
 		{ key: 'entrance_num', label: qahml10n['table_entrance_num'], width: 8, type: 'integer' },
-		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 8, type: 'percentage' },
+		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 8, type: 'percentage', agg: { type: 'wavg', weightKey: 'page_visit_num' } }, // Issue #1175: 直帰率の母数は訪問数（PV数ではない）
 		{ key: 'exit_rate', label: qahml10n['table_exit_rate'], width: 8, type: 'percentage' },
 		{ key: 'page_value', label: qahml10n['table_page_value'], width: 8, type: 'integer' },
 		{ key: 'heatmap', label: qahml10n['table_heatmap'], width: 8, exportable: false, sortable: false, filtering: false, formatter: function(value, row) {
+			if ( row._isTotal ) return ''; // Issue #1445: 合計行は特定 URL を持たない＝ヒートマップを開けないため空白
 			return `<div class="qa-table-heatmap-container">
 					<span class="dashicons dashicons-desktop" data-device_name="dsk" data-page_id="${row.page_id}" data-is_landing_page="0"></span>
 					<span class="dashicons dashicons-tablet" data-device_name="tab" data-page_id="${row.page_id}" data-is_landing_page="0"></span>
@@ -35,6 +36,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -42,7 +44,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			direction: 'desc'
 		}
 	};
-	allpageTable = qaTable.createTable('#tb_allpage', allpageHeader, allpageOptions);
+	allpageTable = qaTable.createTable('#tb_allpage', allpageHeader, { ...allpageOptions, totalRow: { weightKey: 'page_view_num', label: qahml10n['table_total'] } }); // Issue #1175: 合計行（既定母数=PV数。直帰率のみ訪問数で加重平均）
 
     let apradios = document.getElementsByName( `js_apGoals` );
     for ( let jjj = 0; jjj < apradios.length; jjj++ ) {
@@ -122,7 +124,11 @@ jQuery(
 jQuery(document).on('qahm:dateRangeChanged', function( RangeStart, RangeEnd ) {
 	qahm.nowAjaxStep = 0;
 	qahm.renderBehaviorApData(reportDateBetween);
-
+	// [Issue #1231] テーブルは All Goals (gid=0) で再描画されるため、UI のラジオも同期させる
+	let allGoalsRadio = document.getElementById( 'js_apGoals_0' );
+	if ( allGoalsRadio ) {
+		allGoalsRadio.checked = true;
+	}
 });
 
 qahm.renderBehaviorApData = function(dateBetweenStr) {

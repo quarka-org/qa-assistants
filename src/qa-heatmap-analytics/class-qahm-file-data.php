@@ -47,6 +47,12 @@ class QAHM_File_Data extends QAHM_File_Base {
 	 */
 	const DATA_HEADER_VERSION = 0;
 
+	// 位置データ（raw_p）ヘッダー行の追加フィールド。
+	// index0 は DATA_HEADER_VERSION、index1 に is_submit を載せる（T108）。
+	// このPVでネイティブ submit イベントが観測されたか（0/1）。
+	// raw_e ヘッダーが window 解像度を PV 単位で運ぶのと同型。
+	const DATA_POS_HEADER_IS_SUBMIT = 1;
+
 	// 位置データ バージョン1
 	const DATA_POS_1 = array(
 		// body
@@ -82,7 +88,7 @@ class QAHM_File_Data extends QAHM_File_Base {
 		'ELEMENT_ID'        => 6,       // DOM id属性
 		'ELEMENT_CLASS'     => 7,       // class属性
 		'ELEMENT_DATA_ATTR' => 8,       // data-*属性
-		'ACTION_ID'         => 9,       // アクション分類（1:click, 2:submit, 3:tel, 4:mailto）
+		'ACTION_ID'         => 9,       // アクション分類（1:click, 2:form, 3:tel, 4:mailto）T108: 2 は submit 推測→フォーム領域内クリックの DOM 事実に再定義
 		'PAGE_X_PCT'        => 10,      // ページ内クリック位置X（％）整数値
 		'PAGE_Y_PCT'        => 11,      // ページ内クリック位置Y（％）整数値
 	);

@@ -5,8 +5,6 @@ defined( 'ABSPATH' ) || exit;
  *
  * @package qa_heatmap
  */
-// phpcs:disable PluginCheck.UpdateProcedures.update_modification_detected
-// Plugin Check exclusion: QA ZERO disables WordPress auto updates intentionally (not distributed on WordPress.org).
 new QAHM_Admin_Init();
 
 // ファイルのロードや管理画面のメニューを管理するクラス
@@ -40,12 +38,6 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 			add_action( 'admin_init', array( $this, 'zero_user_redirect' ) );
 			add_action( 'admin_menu', array( $this, 'zero_user_remove_menus' ) );
 			add_action( 'wp_before_admin_bar_render', array( $this, 'zero_user_custom_admin_bar' ) );
-
-			// 自動アップデートの停止
-			add_filter( 'auto_update_core', '__return_false' );
-			add_filter( 'auto_update_plugin', '__return_false' );
-			add_filter( 'auto_update_theme', '__return_false' );
-			add_filter( 'auto_update_translation', '__return_false' );
 
 			// ログイン画面のカスタマイズ
 			add_action( 'login_enqueue_scripts', array( $this, 'zero_login_logo' ) );
@@ -171,13 +163,10 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 		global $qahm_admin_page_help;
 		global $qahm_admin_page_entire;
 
-		$cap   = 'manage_options';
-		$user  = wp_get_current_user();
-		$roles = $user->roles;
-		$role  = array_shift( $roles );
-		if ( $role === 'qazero-admin' || $role === 'qazero-view' ) {
-			$cap = $role;
-		}
+		// トップレベル QA メニューの表示 capability（#1277）。
+		// ユーザーの「最初のロール名」で分岐する旧実装（array_shift の癖）を撤廃し、
+		// アクセス領域ベースの cap で判定する。ZERO は「閲覧」以上で表示、それ以外は manage_options。
+		$cap = ( QAHM_TYPE === QAHM_TYPE_ZERO ) ? 'qahm_analytics' : 'manage_options';
 
 		// 事前にモードを決定
 		if ( QAHM_TYPE === QAHM_TYPE_ZERO ) {
@@ -302,7 +291,7 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 				'obj'   => $qahm_admin_page_config,
 				'title' => __( 'Settings', 'qa-heatmap-analytics' ),
 				'icon'  => 'menu_config.svg',
-				'when'  => $this->check_access_role( 'qazero-admin' ),
+				'when'  => $this->check_access_role( 'qahm_settings' ),
 				'type'  => 'normal',
 				'slug'  => QAHM_Admin_Page_Config::SLUG,
 			),
@@ -544,8 +533,9 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 
 	// ZERO専用ユーザーの場合不要なメニューの削除
 	public function zero_user_remove_menus() {
-		$user = wp_get_current_user();
-		if ( $user->has_cap( 'qazero-admin' ) || $user->has_cap( 'qazero-view' ) ) {
+		// QA 専用ユーザー（WP 管理権なし）を意味ベースで判定（#1277）。qahm_analytics を
+		// 持ち manage_options を持たないユーザー＝qazero-admin/view/atelier を一括対象化。
+		if ( current_user_can( 'qahm_analytics' ) && ! current_user_can( 'manage_options' ) ) {
 			remove_menu_page( 'index.php' );
 			remove_menu_page( 'edit.php' );
 			remove_menu_page( 'upload.php' );
@@ -569,9 +559,14 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 	}
 
 	// ZERO専用ユーザーのリダイレクト処理
+	// phpcs:disable PluginCheck.UpdateProcedures.update_modification_detected
+	// Plugin Check exclusion: hides the core update nag and blocks update-core.php for QA ZERO's own
+	// roles (qahm_analytics without manage_options). This restricts the admin UI for those roles only;
+	// it does not alter the update procedure itself.
 	public function zero_user_redirect() {
-		$user = wp_get_current_user();
-		if ( $user->has_cap( 'qazero-admin' ) || $user->has_cap( 'qazero-view' ) ) {
+		// QA 専用ユーザー（WP 管理権なし）を意味ベースで判定（#1277）。qahm_analytics を
+		// 持ち manage_options を持たないユーザー＝qazero-admin/view/atelier を一括対象化。
+		if ( current_user_can( 'qahm_analytics' ) && ! current_user_can( 'manage_options' ) ) {
 			// pagenowを使わないとajaxでコケるっぽい
 			global $pagenow;
 			if ( $pagenow === 'index.php' ||
@@ -598,6 +593,7 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 			remove_action( 'admin_notices', 'update_nag', 3 );
 		}
 	}
+	// phpcs:enable PluginCheck.UpdateProcedures.update_modification_detected
 
 	// ZERO専用ユーザーのアドミンバーのカスタマイズ
 	public function zero_user_custom_admin_bar() {
@@ -718,6 +714,17 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 				exit;
 			}
 
+			// アクティブ1サイト以下の環境では 'all' の行き先が無い（サイトセレクターが静的表示に
+			// なり選び直す UI が存在しない）ため、先頭アクティブサイトへ差し替えてリダイレクトする。
+			// 補正後 URL の次のリクエストで cookie も正値に上書きされる＝古い 'all' cookie の自己回復（#1526）。
+			if ( 'all' === $tracking_id ) {
+				$fallback_tid = $this->get_single_site_fallback_tid();
+				if ( '' !== $fallback_tid ) {
+					wp_safe_redirect( add_query_arg( 'tracking_id', $fallback_tid ) );
+					exit;
+				}
+			}
+
 			setcookie(
 				'tracking_id',
 				$tracking_id,
@@ -748,6 +755,15 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 				exit;
 			}
 
+			// cookie 由来の 'all' も同様に先頭アクティブサイトへ差し替える（理由は URL 分岐側のコメント参照・#1526）。
+			// 補正した tid で URL 補完リダイレクト→次のリクエストの URL 分岐で cookie が正値に上書きされる。
+			if ( 'all' === $tracking_id ) {
+				$fallback_tid = $this->get_single_site_fallback_tid();
+				if ( '' !== $fallback_tid ) {
+					$tracking_id = $fallback_tid;
+				}
+			}
+
 			$current_url = $_SERVER['REQUEST_URI'];
 			$current_url = add_query_arg( 'tracking_id', $tracking_id, $current_url );
 			wp_safe_redirect( $current_url );  // 新しいURLにリダイレクト
@@ -763,6 +779,34 @@ class QAHM_Admin_Init extends QAHM_File_Base {
 				exit;
 			}
 		}
+	}
+
+	/**
+	 * アクティブ1サイト以下の環境で tracking_id='all' を受けたときの差し替え先を返す（#1526）
+	 *
+	 * 'all'（すべてのサイト）は複数サイトを束ねる表示だが、アクティブ1サイトの環境では
+	 * サイトセレクターが静的表示（#1100）になり 'all' から戻る UI が存在しないため、
+	 * 先頭アクティブサイトへフォールバックさせる。対象外（複数サイト・sitemanage 空・
+	 * 先頭 tid 不正）は空文字を返し、呼び出し側は何もしない（＝従来挙動のまま）。
+	 */
+	private function get_single_site_fallback_tid() {
+		global $qahm_data_api;
+		if ( ! $qahm_data_api ) {
+			return '';
+		}
+		$sitemanage = $qahm_data_api->get_sitemanage();
+		if ( empty( $sitemanage ) || ! is_array( $sitemanage ) ) {
+			return '';
+		}
+		// get_sitemanage() は削除済み（status=255）を除外して返す＝count がそのままアクティブ数。
+		if ( count( $sitemanage ) > 1 ) {
+			return '';
+		}
+		$tid = isset( $sitemanage[0]['tracking_id'] ) ? $sitemanage[0]['tracking_id'] : '';
+		if ( '' === $tid || 'all' === $tid || ! $this->validate_tracking_id( $tid ) ) {
+			return '';
+		}
+		return $tid;
 	}
 
 	/**

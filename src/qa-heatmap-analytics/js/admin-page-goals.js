@@ -37,7 +37,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'new_user', label: qahml10n['table_new_user'], width: 10, type: 'integer' },
 		{ key: 'session', label: qahml10n['table_session'], width: 10, type: 'integer' },
 		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 10, type: 'percentage' },
-		{ key: 'page_session', label: qahml10n['table_page_session'], width: 10, type: 'float' },
+		{ key: 'page_session', label: qahml10n['table_page_session'], width: 10, type: 'float', agg: { type: 'wavg', weightKey: 'session' } }, // Issue #1175: ページ/セッションは session 加重平均
 		{ key: 'avg_session_time', label: qahml10n['table_avg_session_time'], width: 10, type: 'duration' },
 	];
 	sourceMediumOptions = {
@@ -46,6 +46,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -53,7 +54,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			direction: 'desc'
 		},
 	};
-	sourceMediumTable = qaTable.createTable('#tb_goalsm', sourceMediumHeader, sourceMediumOptions);
+	sourceMediumTable = qaTable.createTable('#tb_goalsm', sourceMediumHeader, { ...sourceMediumOptions, totalRow: { weightKey: 'session', label: qahml10n['table_total'] } }); // Issue #1175: 合計行（既存合計行なし・クライアント集計。率は session 加重平均）
 
 	//create lp table
 	landingpageHeader = [
@@ -64,7 +65,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'new_session_rate', label: qahml10n['table_new_session_rate'], width: 9, type: 'percentage' },
 		{ key: 'new_user', label: qahml10n['table_new_user'], width: 9, type: 'integer' },
 		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 9, type: 'percentage' },
-		{ key: 'page_session', label: qahml10n['table_page_session'], width: 9, type: 'float' },
+		{ key: 'page_session', label: qahml10n['table_page_session'], width: 9, type: 'float', agg: { type: 'wavg', weightKey: 'session' } }, // Issue #1175: ページ/セッションは session 加重平均
 		{ key: 'avg_session_time', label: qahml10n['table_avg_session_time'], width: 9, type: 'duration' },
 	];
 	landingpageOptions = {
@@ -73,6 +74,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -80,7 +82,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			direction: 'desc'
 		}
 	};
-	landingpageTable = qaTable.createTable('#tb_goallp', landingpageHeader, landingpageOptions);
+	landingpageTable = qaTable.createTable('#tb_goallp', landingpageHeader, { ...landingpageOptions, totalRow: { weightKey: 'session', label: qahml10n['table_total'] } }); // Issue #1175: 合計行（既存合計行なし。率は session 加重平均）
 
 	// create heatmap table
 	heatmapHeader = [
@@ -104,6 +106,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -171,6 +174,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
 		filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -235,6 +239,8 @@ jQuery(
 jQuery(document).on('qahm:dateRangeChanged', function( RangeStart, RangeEnd ) {
 	qahm.nowAjaxStep = 0;
 	qahm.renderGoalsData(reportDateBetween, dateRangeYmdAry);
+	// [Issue #1233] セッション一覧は All Goals (gid=0) で再描画されるため、セレクタのラジオ + ボックスハイライトも同期させる
+	qahm.resetGoalRagioButton();
 });
 
 qahm.renderGoalsData = function(dateBetweenStr, dateYmdAry) {
@@ -469,116 +475,40 @@ qahm.renderGoalsData = function(dateBetweenStr, dateYmdAry) {
                 }
                 qahm.goalsSummary[0].nValue = allvalue;
 
-                //make datasets
-                let cvDatesets = new Array();
+                //make datasets（#1280: qahm.EChart ラッパ経由）
+                let cvSeries = [];
                 for (let gid = 0; gid < qahm.goalsSessionData.length; gid++) {
-                    let rgba = qahm.graphColorGoals[gid];
-                    let hide = false;
-                    if (gid === 0 ) { hide = true;}
-                    cvDatesets[gid] = {
-                                type: 'bar',
-                                hidden: hide,
-                                label: decodeURI(qahm.goalsArray[gid].gtitle),
-                                data: qahm.goalsSummary[gid].cvPerDay,
-                                backgroundColor: rgba,
-                                borderColor: rgba,
-                                borderJoinStyle: 'bevel',
-                                borderWidth: 2,
-                                borderDash: [10, 1, 2, 1],
-                                pointStyle: 'rectRot',
-                                lineTension: 0,
-                                fill: false,
-                                yAxisID: 'goals'
-                    };
+                    cvSeries.push({
+                        name: decodeURI(qahm.goalsArray[gid].gtitle),
+                        type: 'bar',
+                        data: qahm.goalsSummary[gid].cvPerDay,
+                        color: qahm.graphColorGoals[gid],
+                        yAxisIndex: 0,
+                        hidden: gid === 0 // 全体集計は初期非表示（凡例クリックで表示可能 = 現行踏襲）
+                    });
                 }
-                cvDatesets[qahm.goalsSessionData.length] = {
-					type: 'line',  // 明示的に型を指定
-					label: qahml10n['graph_sessions'],
-					data: qahm.graphDataArySessions,
-					backgroundColor: 'rgba(105,164,226, 0.1)',
-					borderColor: 'rgba(105,164,226, 0.8)',  // 線の色を追加
-					borderWidth: 2,  // 線の太さを指定
-					pointRadius: 2,  // ポイントのサイズを小さく
-					pointHoverRadius: 5,  // ホバー時のサイズ
-					fill: false,  // 塗りつぶし
-					lineTension: 0.4,  // 曲線の滑らかさ
-					yAxisID: 'session',
-					// 以下の設定を追加
-					spanGaps: true,  // データの欠損部分を線でつなぐ
-					// 表示範囲を調整
-					hidden: false  // 明示的に表示するよう設定
-				}
-                qahm.resetCanvas("cvConversionGraph");
-				let dateLabels = qahm.makeFormattedDatesArray( reportRangeStart, reportRangeEnd, 'YYYY/MM/DD' );
-                let cvConversionGraph = document.getElementById("cvConversionGraph").getContext('2d');
-                if (cvConversionGraph) {
-                    let conversionGraphChart = new Chart(cvConversionGraph, {
-						type: 'line',
-						data: {
-							labels: dateLabels,
-							datasets: cvDatesets,
-						},
-						options: {
-							responsive: true,
-							maintainAspectRatio: false,
-							// 全体のスペースを確保
-							layout: {
-								padding: {
-									left: 10,
-									right: 30, // 右側に余裕を持たせる
-									top: 20,
-									bottom: 10
-								}
-							},
-							scales: {
-								xAxes: [{
-									// カテゴリのオフセットを調整
-									offset: true,
-									// グリッド線の設定
-									gridLines: {
-										offsetGridLines: true
-									},
-									// 日付ラベルの設定
-									ticks: {
-										autoSkip: true,
-										maxRotation: 0,
-										minRotation: 0,
-										maxTicksLimit: 10
-									}
-								}],
-								yAxes: [{
-									id: 'goals',
-									position: 'left',
-									ticks: {
-										beginAtZero: true,
-										// Y軸の最大値を調整して縦方向にズームアウト
-										callback: function(value) {
-											return value;
-										}
-									}
-								},{
-									id: 'session',
-									position: 'right',
-									ticks: {
-										beginAtZero: true
-									},
-									gridLines: {
-										drawOnChartArea: false // 2つ目のY軸のグリッド線を非表示に
-									}
-								}]
-							},
-							// データセットのバー幅調整
-							elements: {
-								rectangle: {
-									borderWidth: 1
-								}
-							},
-							tooltips: {
-								mode: 'index',
-								intersect: false
-							}
-						}
-					});
+                cvSeries.push({
+                    name: qahml10n['graph_sessions'],
+                    type: 'line',
+                    data: qahm.graphDataArySessions,
+                    // 注: rgba 形式のため、将来 area:true を付ける場合は hex 化が必要（ラッパの hexToRgba は hex のみ対応）
+                    color: 'rgba(105,164,226, 0.8)',
+                    yAxisIndex: 1,
+                    smooth: true // 現行 lineTension 0.4 相当
+                });
+                let dateLabels = qahm.makeFormattedDatesArray( reportRangeStart, reportRangeEnd, 'YYYY/MM/DD' );
+                let cvGraphEl = document.getElementById("cvConversionGraph");
+                if (cvGraphEl) {
+                    cvGraphEl.style.display = '';
+                    qahm.EChart.create( cvGraphEl, {
+                        kind: 'combo',
+                        labels: dateLabels,
+                        series: cvSeries,
+                        // 左 = goals / 右 = sessions（独立スケール・右軸の目盛り線非表示 = 現行踏襲）
+                        yAxes: [ {}, { splitLine: false } ],
+                        legend: true,
+                        maxXTicks: 10
+                    } );
                 }
                 //draw gsession_selector and graph
                 for (let gid = 0; gid < qahm.goalsSessionData.length; gid++) {
@@ -595,55 +525,37 @@ qahm.renderGoalsData = function(dateBetweenStr, dateYmdAry) {
 
 
                     let canvasid = 'js_gssCanvas_' + gid.toString();
-                    qahm.resetCanvas(canvasid);
-                    let canvas   = document.getElementById(canvasid);
-                    if ( canvas !== null ) {
+                    let gssEl    = document.getElementById(canvasid);
+                    if ( gssEl !== null ) {
                         let goalhope     = qahm.goalsArray[gid].gnum_scale / 30 * termdate;
                         let cvGoalData   = [ qahm.goalsSummary[gid].nCount, Math.floor( goalhope ) ];
-                        let cvGoalGraphChart = new Chart(canvas, {
-                            type: 'bar',
-                            data: {
-								labels: [ qahml10n['cnv_graph_present'], qahml10n['cnv_graph_goal'] ],
-								datasets: [{
-									label:qahml10n['cnv_graph_completions'],
-									fill: false,
-									lineTension: 0,
-									data: cvGoalData,
-									backgroundColor: [qahm.graphColorGoals[gid], qahm.colorAlfaChange(qahm.graphColorGoals[gid], 0.3) ],
-								}],
-                            },
-                            options: {
-                                legend: {
-                                    labels: {
-                                        fontSize: 9
-                                    },
-                                },
-                                barPercentage : 1,
-                                scales: {
-                                    xAxes: [{
-                                        stacked: true, //積み上げ棒グラフにする設定
-                                    }],
-                                    yAxes: [{
-                                        stacked: true, //積み上げ棒グラフにする設定
-                                        ticks: {
-                                            beginAtZero: true
-                                        },
-                                        beforeBuildTicks: function( axis ) {
-                                            if ( axis.max < 10 ) {
-                                                axis.options.ticks.stepSize = 1;
-                                            }
-                                        }
-                                    }]
-                                }
-                            },
-                        });
+                        let gssMax       = Math.max( cvGoalData[0], cvGoalData[1] );
+                        // #1280: qahm.EChart ラッパ経由（冪等 create）
+                        qahm.EChart.create( gssEl, {
+                            kind: 'bar',
+                            labels: [ qahml10n['cnv_graph_present'], qahml10n['cnv_graph_goal'] ],
+                            series: [ {
+                                name: qahml10n['cnv_graph_completions'],
+                                data: cvGoalData,
+                                color: qahm.graphColorGoals[gid], // 凡例マーカー用の系列色
+                                colors: [ qahm.graphColorGoals[gid], qahm.colorAlfaChange( qahm.graphColorGoals[gid], 0.3 ) ]
+                            } ],
+                            legend: true,
+                            // 現行 beforeBuildTicks 踏襲: 最大値が小さいときは目盛り刻み 1
+                            yAxes: gssMax < 10 ? [ { interval: 1 } ] : undefined
+                        } );
                     }
                 }
                 qahm.drawSessionsView(qahm.goalsSessionData[0]);
 
             } else {
 				qahm.drawSessionsView([]);
-                qahm.resetCanvas("cvConversionGraph", 'style="height: 0"');
+                // ゴールなし: グラフを破棄して非表示
+                let cvHideEl = document.getElementById("cvConversionGraph");
+                if (cvHideEl) {
+                    qahm.EChart.destroyByEl( cvHideEl );
+                    cvHideEl.style.display = 'none';
+                }
             }
 
             qahm.nowAjaxStep = 0;
@@ -1764,14 +1676,23 @@ qahm.resetGoalRagioButton = function() {
 	// name="js_gsession_selector" のラジオボタンを全て取得
 	const radioButtons = document.querySelectorAll('input[name="js_gsession_selector"]');
 
-	// 各ラジオボタンのチェックを外す
+	// 各ラジオボタンのチェックを外す + ボックスのハイライトを外す
 	radioButtons.forEach((radioButton) => {
 		radioButton.checked = false;
+		// [Issue #1233] セレクタのボックスハイライト (bl_goalBoxChecked) も同期させる
+		const box = radioButton.closest('.bl_goalBox');
+		if (box) {
+			box.classList.remove('bl_goalBoxChecked');
+		}
 	});
-	// 特定のラジオボタンにチェックを入れる
+	// 特定のラジオボタン (All Goals = _0) にチェック + ハイライトを入れる
 	const specificRadioButton = document.getElementById('js_gsession_selector_0');
 	if (specificRadioButton) {
 		specificRadioButton.checked = true;
+		const specificBox = specificRadioButton.closest('.bl_goalBox');
+		if (specificBox) {
+			specificBox.classList.add('bl_goalBoxChecked');
+		}
 	}
 }
 

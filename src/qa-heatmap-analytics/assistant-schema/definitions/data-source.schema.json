@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/data-source.schema.json",
+  "title": "Data source",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "query", "into"],
+  "properties": {
+    "type": { "const": "qal" },
+    "query": { "$ref": "qal-query.schema.json" },
+    "into": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Variable name to store the result into (no $ prefix)."
+    },
+    "transform": {
+      "type": "array",
+      "items": { "$ref": "transform-step.schema.json" }
+    }
+  }
+}

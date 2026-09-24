@@ -176,6 +176,8 @@
   max-width: 80%;
   width: fit-content;
   font-size: 14px;
+  /* Issue #1216: scrollIntoView({block:'start'}) 時に viewport 上端と要素の間に余白を残す */
+  scroll-margin-top: 30px;
 }
 #qahm-page-analysis-assistant-window .qahm-conversation-message.qahm-conversation-user {
   padding: 10px 14px;
@@ -332,5 +334,3 @@
     transform-origin: center;
   }
 }
-
-/*# sourceMappingURL=page-analysis-assistant-wp.css.map */

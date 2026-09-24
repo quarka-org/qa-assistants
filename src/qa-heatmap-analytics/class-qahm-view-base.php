@@ -67,7 +67,7 @@ class QAHM_View_Base extends QAHM_File_Data {
 		// セキュリティ
 		$php = '<?php ' .
 			'require_once("' . $this->get_relative_path( $current_path, ABSPATH . 'wp-load.php' ) . '");' .
-			'$qahm_base = new QAHM_Base();if(!$qahm_base->check_access_role("qazero-view")){http_response_code(404);exit;}' .
+			'$qahm_base = new QAHM_Base();if(!$qahm_base->check_access_role("qahm_analytics")){http_response_code(404);exit;}' .
 			'?>';
 
 		$html = $php;

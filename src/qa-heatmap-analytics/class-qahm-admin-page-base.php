@@ -46,6 +46,14 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 		wp_enqueue_script( QAHM_NAME . '-common', $js_dir_url . 'common.js', array( 'jquery', QAHM_NAME . '-qa-table' ), QAHM_PLUGIN_VERSION );
 		wp_enqueue_script( QAHM_NAME . '-load-screen', $js_dir_url . 'load-screen.js', array( QAHM_NAME . '-common' ), QAHM_PLUGIN_VERSION );
 		wp_enqueue_script( QAHM_NAME . '-effect', $js_dir_url . 'effect.js', array( QAHM_NAME . '-load-screen' ), QAHM_PLUGIN_VERSION );
+
+		// 日付範囲アダプタ（Cally）の登録のみ（画面への enqueue は各画面の移行 Phase で実施）。
+		// Cally は ESM のみ配布のため IIFE 化して同梱。コア1箇所で登録し、衛星プラグインは
+		// 同ハンドルを enqueue するだけで WP の重複排除が効く（customElements.define 二重定義回避）。
+		$css_dir_url = $this->get_css_dir_url();
+		wp_register_script( QAHM_NAME . '-cally', $js_dir_url . 'lib/cally/cally.iife.js', null, QAHM_PLUGIN_VERSION, true );
+		wp_register_script( QAHM_NAME . '-daterange', $js_dir_url . 'qahm-daterange.js', array( QAHM_NAME . '-cally' ), QAHM_PLUGIN_VERSION, true );
+		wp_register_style( QAHM_NAME . '-daterange', $css_dir_url . 'qahm-daterange.css', null, QAHM_PLUGIN_VERSION );
 	}
 
 	/**
@@ -81,6 +89,7 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 			'wp_timezone'    => $timezone,
 			'wp_lang'        => get_option( 'WPLANG' ),
 			'wp_user_locale' => get_user_locale(),
+			'locale_for_js'  => str_replace( '_', '-', $this->normalize_locale( get_locale() ) ),
 		);
 
 		return $scripts;
@@ -203,30 +212,40 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 				'}' .
 				'</style>';
 
-		$mes  = '<div class="mainteqa">';
-		$mes .= '<h1>' . esc_html__( 'Maintenance Notice', 'qa-heatmap-analytics' ) . '</h1>';
-		$mes .= '<p>' . esc_html__( 'Your data is currently undergoing maintenance. This process may take a few minutes to complete.', 'qa-heatmap-analytics' ) . '</p>';
-		$mes .= '<p>' . esc_html__( 'After updating the plugin, changes may take a few minutes to apply. Reloading the page afterward is recommended.', 'qa-heatmap-analytics' ) . '</p>';
-		$mes .= '<p>' . sprintf(
-			/* translators: %1$s and %2$s are anchor tags for the troubleshooting page */
-			esc_html__( 'If this notice continues to appear for an extended period, please refer to our %1$sTroubleshooting page%2$s.', 'qa-heatmap-analytics' ),
-			'<a href="https://mem.quarka.org/en/manual/keep-getting-data-is-under-maintenance/" target="_blank" rel="noopener">',
-			'</a>'
-		) . '</p>';
+		$mes = '<div class="mainteqa">';
 
-		$mes   .= '<hr>';
-		$locale = get_locale();
-		if ( $this->wrap_strpos( $locale, 'ja' ) === 0 ) {
-			$mes .= '<p><strong>QA Analytics から更新された方へ</strong><br>';
-			$mes .= 'これまでの計測データは、QA Assistants で利用できるよう引き継ぎ準備中です。<br>';
-			$mes .= 'しばらくすると通常の画面に戻りますが、夜間処理が完了するまでレポートは「データがありません」と表示されます。<br>';
-			$mes .= '計測は通常どおり継続しています。明日の反映を楽しみにお待ちください。</p>';
-		} else {
-			$mes .= '<p><strong>' . esc_html__( 'For users updating from QA Analytics', 'qa-heatmap-analytics' ) . '</strong><br>';
-			$mes .= esc_html__( 'Your past analytics data is being carried over and prepared for use in QA Assistants.', 'qa-heatmap-analytics' ) . '<br>';
-			$mes .= esc_html__( 'The normal screen will return shortly, but reports will show "No data available" until the nightly process is finished.', 'qa-heatmap-analytics' ) . '<br>';
-			$mes .= esc_html__( 'Tracking continues as usual, so please look forward to seeing your data reflected tomorrow.', 'qa-heatmap-analytics' ) . '</p>';
+		if ( QAHM_TYPE === QAHM_TYPE_ZERO ) {
+			// ZERO ではバージョン更新に伴うデータ更新処理として提示する（日本語運用のみ）。
+			$mes .= '<h1>更新処理中です</h1>';
+			$mes .= '<p>現在、バージョン更新に伴う処理を行っています。データ量によっては、完了までに時間がかかる場合があります。</p>';
+			$mes .= '<p>しばらく時間をおいてから、ページを再読み込みしてください。</p>';
+			$mes .= '<p>長時間この画面が表示される場合は、サポートまでお問い合わせください。</p>';
+		} elseif ( QAHM_TYPE === QAHM_TYPE_WP ) {
+			$mes .= '<h1>' . esc_html__( 'Maintenance Notice', 'qa-heatmap-analytics' ) . '</h1>';
+			$mes .= '<p>' . esc_html__( 'Your data is currently undergoing maintenance. This process may take a few minutes to complete.', 'qa-heatmap-analytics' ) . '</p>';
+			$mes .= '<p>' . esc_html__( 'After updating the plugin, changes may take a few minutes to apply. Reloading the page afterward is recommended.', 'qa-heatmap-analytics' ) . '</p>';
+			$mes .= '<p>' . sprintf(
+				/* translators: %1$s and %2$s are anchor tags for the troubleshooting page */
+				esc_html__( 'If this notice continues to appear for an extended period, please refer to our %1$sTroubleshooting page%2$s.', 'qa-heatmap-analytics' ),
+				'<a href="https://mem.quarka.org/en/manual/keep-getting-data-is-under-maintenance/" target="_blank" rel="noopener">',
+				'</a>'
+			) . '</p>';
+
+			$mes   .= '<hr>';
+			$locale = get_locale();
+			if ( $this->wrap_strpos( $locale, 'ja' ) === 0 ) {
+				$mes .= '<p><strong>QA Analytics から更新された方へ</strong><br>';
+				$mes .= 'これまでの計測データは、QA Assistants で利用できるよう引き継ぎ準備中です。<br>';
+				$mes .= 'しばらくすると通常の画面に戻りますが、夜間処理が完了するまでレポートは「データがありません」と表示されます。<br>';
+				$mes .= '計測は通常どおり継続しています。明日の反映を楽しみにお待ちください。</p>';
+			} else {
+				$mes .= '<p><strong>' . esc_html__( 'For users updating from QA Analytics', 'qa-heatmap-analytics' ) . '</strong><br>';
+				$mes .= esc_html__( 'Your past analytics data is being carried over and prepared for use in QA Assistants.', 'qa-heatmap-analytics' ) . '<br>';
+				$mes .= esc_html__( 'The normal screen will return shortly, but reports will show "No data available" until the nightly process is finished.', 'qa-heatmap-analytics' ) . '<br>';
+				$mes .= esc_html__( 'Tracking continues as usual, so please look forward to seeing your data reflected tomorrow.', 'qa-heatmap-analytics' ) . '</p>';
+			}
 		}
+
 		$mes .= '</div>';
 
 		echo wp_kses( $style, array( 'style' => array() ) );
@@ -301,10 +320,13 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 	 * サイトセレクターを表示（QA ZERO のみ）
 	 *
 	 * ページヘッダー内（タイトル横）にサイト切替セレクトボックスを表示する。
-	 * 登録サイトが1つだけの場合は非表示。QA Assistants では何も出力しない。
+	 * 登録サイトが複数あるときだけ <select>（切替可）を出す。1つだけのときは
+	 * 切替先が無いため <span> でドメイン名を静的表示する（ドロップダウンにしない）。
+	 * QA Assistants では何も出力しない。
 	 *
 	 * @since #901 Step 2
-	 * @since #914 ヘッダー内統合、ラベル削除、1サイト時非表示
+	 * @since #914 ヘッダー内統合、ラベル削除
+	 * @since #1100 横幅を可変化（長いドメインで矢印が文字と被るのを解消）、1サイト時は静的表示
 	 */
 	protected function render_site_selector() {
 		if ( QAHM_TYPE !== QAHM_TYPE_ZERO ) {
@@ -346,25 +368,28 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 			return;
 		}
 		?>
-		<select class="qa-zero-header__site-select" id="qa-zero-site-select">
-			<?php if ( $site_count > 1 ) : ?>
-			<option value="all"<?php selected( $current_tracking_id, 'all' ); ?>>
-				<?php esc_html_e( 'すべてのサイト', 'qa-heatmap-analytics' ); ?>
-			</option>
-			<?php endif; ?>
-			<?php foreach ( $active_sites as $site ) : ?>
-				<option value="<?php echo esc_attr( $site['tracking_id'] ); ?>"<?php selected( $current_tracking_id, $site['tracking_id'] ); ?>>
-					<?php echo esc_html( $site['url'] ); ?>
+		<?php if ( $site_count <= 1 ) : ?>
+			<?php // 切替先が無い1サイト時はドロップダウンにせず、ドメインを静的表示する。 ?>
+			<span class="qa-zero-header__site-name"><?php echo esc_html( $active_sites[0]['url'] ); ?></span>
+		<?php else : ?>
+			<select class="qa-zero-header__site-select" id="qa-zero-site-select">
+				<option value="all"<?php selected( $current_tracking_id, 'all' ); ?>>
+					<?php esc_html_e( 'すべてのサイト', 'qa-heatmap-analytics' ); ?>
 				</option>
-			<?php endforeach; ?>
-		</select>
-		<script>
-			document.getElementById( 'qa-zero-site-select' ).addEventListener( 'change', function() {
-				var url = new URL( window.location.href );
-				url.searchParams.set( 'tracking_id', this.value );
-				window.location.href = url.toString();
-			} );
-		</script>
+				<?php foreach ( $active_sites as $site ) : ?>
+					<option value="<?php echo esc_attr( $site['tracking_id'] ); ?>"<?php selected( $current_tracking_id, $site['tracking_id'] ); ?>>
+						<?php echo esc_html( $site['url'] ); ?>
+					</option>
+				<?php endforeach; ?>
+			</select>
+			<script>
+				document.getElementById( 'qa-zero-site-select' ).addEventListener( 'change', function() {
+					var url = new URL( window.location.href );
+					url.searchParams.set( 'tracking_id', this.value );
+					window.location.href = url.toString();
+				} );
+			</script>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -373,39 +398,91 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 	 */
 	protected function view_rss_feed( $wrap_in_container = true ) {
 		$wp_lang_set = get_bloginfo( 'language' );
+		$is_japanese = $this->wrap_strpos( $wp_lang_set, 'ja' ) === 0;
 
-		// 日本語環境以外では表示しない
-		if ( $this->wrap_strpos( $wp_lang_set, 'ja' ) !== 0 ) {
+		// 日本語以外の表示の段階導入フラグ。
+		// 英語リリース告知の運用が追いつかない場合は false にすると
+		// 日本語以外の環境で従来どおり非表示に戻せる。
+		$enable_en_locale = true;
+
+		// 日本語以外は、QA Assistants かつフラグ ON のときだけ表示
+		// （ZERO は常に ja 限定）
+		if ( ! $is_japanese && ( ! $enable_en_locale || QAHM_TYPE !== QAHM_TYPE_WP ) ) {
 			return;
 		}
 
 		include_once ABSPATH . WPINC . '/feed.php';
 
-		// プラグイン種別に応じてRSS情報を設定
+		// プラグイン種別・ロケールに応じて、表示する RSS グループを構築する。
+		// 1 グループ = 1 つのフィード（URL + 取得件数 + タグ絞込 + 見出し）。
 		if ( QAHM_TYPE === QAHM_TYPE_ZERO ) {
-			$rss_url      = 'https://qazero.com/blog/feed/';
 			$heading_text = __( 'QA ZERO ブログ', 'qa-heatmap-analytics' );
-			$post_number  = 5;
+			$feed_groups  = array(
+				array(
+					// ZERO は 1 グループのみ運用のため、
+					// 上部の $heading_text と重複させないよう、
+					// グループ見出しは空にして出力を抑制する。
+					'title'       => '',
+					'url'         => 'https://qazero.com/blog/feed/',
+					'post_number' => 5,
+					'filter_tag'  => null,
+				),
+			);
 		} elseif ( QAHM_TYPE === QAHM_TYPE_WP ) {
-			$rss_url      = 'https://mem.quarka.org/category/wpuserinfo/feed/';
 			$heading_text = __( "What's New", 'qa-heatmap-analytics' );
-			$post_number  = 3;
+
+			// Release Notes: ドキュメントサイトのリリース告知。
+			// - 日本語: 1 件（下に quarka.org のブログ 3 件が並ぶ）
+			// - 英語 : 3 件（英語では Blog グループを出さないため、単独で 3 件表示）
+			$feed_groups = array(
+				array(
+					'title'       => __( 'Release Notes', 'qa-heatmap-analytics' ),
+					'url'         => $is_japanese
+						? 'https://docs.quarka.org/ja/blog/rss.xml'
+						: 'https://docs.quarka.org/blog/rss.xml',
+					'post_number' => $is_japanese ? 1 : 3,
+					'filter_tag'  => 'release',
+				),
+			);
+
+			// Blog: 公式サイト quarka.org の plugin-rss タグ付き記事。
+			// 現時点では日本語環境のみ表示する（英語ブログは未運用のため）。
+			if ( $is_japanese ) {
+				$feed_groups[] = array(
+					'title'       => __( 'Blog', 'qa-heatmap-analytics' ),
+					'url'         => 'https://quarka.org/tag/plugin-rss/feed/',
+					'post_number' => 3,
+					'filter_tag'  => null,
+				);
+			}
 		} else {
 			return;
 		}
 
-		$rss = fetch_feed( $rss_url );
-		if ( is_wp_error( $rss ) ) {
+		// 各グループの記事を取得。
+		// 片方のフィード取得に失敗しても、もう片方は表示できる構造。
+		// タグ未作成などで 0 件になったグループは、そのまま除外する。
+		$rss_groups = array();
+		foreach ( $feed_groups as $feed_group ) {
+			$items = $this->get_rss_items(
+				$feed_group['url'],
+				$feed_group['post_number'],
+				$feed_group['filter_tag']
+			);
+			if ( empty( $items ) ) {
+				continue;
+			}
+			$rss_groups[] = array(
+				'title' => $feed_group['title'],
+				'items' => $items,
+			);
+		}
+
+		if ( empty( $rss_groups ) ) {
 			return;
 		}
 
-		$maxitems = $rss->get_item_quantity( $post_number );
-		if ( empty( $maxitems ) || $maxitems <= 0 ) {
-			return;
-		}
-
-		$rss_items   = $rss->get_items( 0, $maxitems );
-		$date_format = 'Y年n月j日'; // 日本語前提で固定
+		$date_format = $is_japanese ? 'Y年n月j日' : 'M j, Y';
 		?>
 
 		<?php if ( $wrap_in_container ) : ?>
@@ -427,18 +504,25 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 		<?php endif; ?>
 
 				<div class="rss-widget">
-					<ul>
-						<?php foreach ( $rss_items as $item ) : ?>
-							<li>
-								<span class="qa-zero-data__rss-date">
-									<?php echo esc_html( $item->get_date( $date_format ) ); ?>
-								</span>
-								<a href="<?php echo esc_url( $item->get_permalink() ); ?>" target="_blank" class="rsswidget" rel="noopener">
-									<?php echo esc_html( $item->get_title() ); ?>
-								</a>
-							</li>
-						<?php endforeach; ?>
-					</ul>
+					<?php foreach ( $rss_groups as $rss_group ) : ?>
+						<div class="qa-zero-data__rss-group">
+							<?php if ( '' !== $rss_group['title'] ) : ?>
+								<h4 class="qa-zero-data__rss-group-title"><?php echo esc_html( $rss_group['title'] ); ?></h4>
+							<?php endif; ?>
+							<ul>
+								<?php foreach ( $rss_group['items'] as $item ) : ?>
+									<li>
+										<span class="qa-zero-data__rss-date">
+											<?php echo esc_html( $item->get_date( $date_format ) ); ?>
+										</span>
+										<a href="<?php echo esc_url( $item->get_permalink() ); ?>" target="_blank" class="rsswidget" rel="noopener">
+											<?php echo esc_html( $item->get_title() ); ?>
+										</a>
+									</li>
+								<?php endforeach; ?>
+							</ul>
+						</div>
+					<?php endforeach; ?>
 				</div>
 		<?php if ( $wrap_in_container ) : ?>
 			</div>
@@ -453,6 +537,52 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 	 */
 	protected function print_rss_feed() {
 		$this->view_rss_feed();
+	}
+
+	/**
+	 * 指定 RSS から記事を取得する。
+	 *
+	 * フィード取得エラー、記事 0 件、タグ絞り込みで該当 0 件のいずれも空配列を返す。
+	 * タグ未作成のフィード URL を渡した場合でも呼び出し側は例外・警告なく扱える。
+	 *
+	 * @param string      $rss_url     フィード URL。
+	 * @param int         $post_number 最大取得件数。
+	 * @param string|null $filter_tag  カテゴリ（タグ）で絞り込む場合の term。null なら絞り込みなし。
+	 * @return array 取得できた記事の配列。取得できなかった場合は空配列。
+	 */
+	protected function get_rss_items( $rss_url, $post_number, $filter_tag = null ) {
+		$rss = fetch_feed( $rss_url );
+		if ( is_wp_error( $rss ) ) {
+			return array();
+		}
+
+		if ( null === $filter_tag ) {
+			$maxitems = $rss->get_item_quantity( $post_number );
+			if ( empty( $maxitems ) || $maxitems <= 0 ) {
+				return array();
+			}
+			return $rss->get_items( 0, $maxitems );
+		}
+
+		$all_items = $rss->get_items( 0, $rss->get_item_quantity() );
+		$rss_items = array();
+		foreach ( $all_items as $item ) {
+			$cats = $item->get_categories();
+			if ( ! $cats ) {
+				continue;
+			}
+			foreach ( $cats as $cat ) {
+				if ( $filter_tag === $cat->get_term() ) {
+					$rss_items[] = $item;
+					break;
+				}
+			}
+			if ( count( $rss_items ) >= $post_number ) {
+				break;
+			}
+		}
+
+		return $rss_items;
 	}
 
 	/**
@@ -498,5 +628,23 @@ class QAHM_Admin_Page_Base extends QAHM_File_Data {
 			'</div>';
 
 		echo wp_kses_post( $footer_html );
+	}
+	protected function get_x_link() {
+
+		if ( QAHM_TYPE !== QAHM_TYPE_WP ) {
+			return;
+		}
+
+		$locale      = get_locale();
+		$is_japanese = $this->wrap_strpos( $locale, 'ja' ) === 0;
+
+		if ( $is_japanese ) {
+			$link = 'https://x.com/QAAssistants';
+		} else {
+			$link = 'https://x.com/QAAssistantsEN';
+		}
+
+		return $link;
+
 	}
 } // end of class

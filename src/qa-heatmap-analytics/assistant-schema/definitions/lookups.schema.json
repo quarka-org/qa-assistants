@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/lookups.schema.json",
+  "title": "Lookups",
+  "description": "Value-conversion dictionaries. Each named dictionary maps a source string to a converted string.",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": { "type": "string" }
+  }
+}

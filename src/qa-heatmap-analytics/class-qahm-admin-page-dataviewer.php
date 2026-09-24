@@ -37,7 +37,6 @@ class QAHM_Admin_Page_Dataviewer extends QAHM_Admin_Page_Base {
 		if ( $scripts['goalsJson'] === 'null' ) {
 			$scripts['goalsJson'] = null;
 		}
-		$scripts['siteinfoJson'] = $qahm_data_api->get_siteinfo_json( $tracking_id );
 		wp_add_inline_script( QAHM_NAME . '-common', 'var ' . QAHM_NAME . ' = ' . QAHM_NAME . ' || {}; let ' . QAHM_NAME . 'Obj = ' . $this->wrap_json_encode( $scripts ) . '; ' . QAHM_NAME . ' = Object.assign( ' . QAHM_NAME . ', ' . QAHM_NAME . 'Obj );', 'before' );
 	}
 
@@ -50,8 +49,7 @@ class QAHM_Admin_Page_Dataviewer extends QAHM_Admin_Page_Base {
 		$localize['table_id_tooltip']       = esc_html__( 'An ID which was uniquely assigned by QA to a user.', 'qa-heatmap-analytics' );
 		$localize['table_1page_me']         = esc_html__( 'Landing Page', 'qa-heatmap-analytics' );
 		$localize['table_ridatsu_page']     = esc_html__( 'Exit Page', 'qa-heatmap-analytics' );
-		$localize['table_sanshoumoto']      = esc_html__( 'Source', 'qa-heatmap-analytics' );
-		$localize['table_pv']               = esc_html__( 'Pageviews', 'qa-heatmap-analytics' );
+		$localize['table_pv']               = esc_html_x( 'Pageviews', 'a column header in a table', 'qa-heatmap-analytics' );
 		$localize['table_site_taizaijikan'] = esc_html__( 'Time on Site', 'qa-heatmap-analytics' );
 		$localize['table_saisei']           = esc_html__( 'Replay', 'qa-heatmap-analytics' );
 		$localize['table_page_title']       = esc_html__( 'Page Title', 'qa-heatmap-analytics' );
@@ -67,8 +65,8 @@ class QAHM_Admin_Page_Dataviewer extends QAHM_Admin_Page_Base {
 		$localize['table_page_session']         = esc_html__( 'Pages / Session', 'qa-heatmap-analytics' );
 		$localize['table_avg_session_time']     = esc_html__( 'Avg. Time on Site', 'qa-heatmap-analytics' );
 		$localize['table_channel']              = esc_html__( 'Channel', 'qa-heatmap-analytics' );
-		$localize['table_referrer']             = esc_html__( 'Source', 'qa-heatmap-analytics' );
-		$localize['table_media']                = esc_html__( 'Medium', 'qa-heatmap-analytics' );
+		$localize['table_referrer']             = esc_html_x( 'Source', 'referrer domain label', 'qa-heatmap-analytics' );
+		$localize['table_media']                = esc_html( qahm_get_utm_label( 'medium' ) );
 		$localize['table_title']                = esc_html__( 'Title', 'qa-heatmap-analytics' );
 		$localize['table_url']                  = esc_html__( 'URL', 'qa-heatmap-analytics' );
 		$localize['table_new_session_rate']     = esc_html__( '% New Sessions', 'qa-heatmap-analytics' );
@@ -77,7 +75,7 @@ class QAHM_Admin_Page_Dataviewer extends QAHM_Admin_Page_Base {
 		$localize['table_past_session']         = esc_html__( 'Sessions (Earliest 7days)', 'qa-heatmap-analytics' );
 		$localize['table_recent_session']       = esc_html__( 'Sessions (Latest 7days)', 'qa-heatmap-analytics' );
 		$localize['table_growth_rate']          = esc_html__( 'Growth Rate', 'qa-heatmap-analytics' );
-		$localize['table_page_view_num']        = esc_html__( 'Pageviews', 'qa-heatmap-analytics' );
+		$localize['table_page_view_num']        = esc_html_x( 'Pageviews', 'a column header in a table', 'qa-heatmap-analytics' );
 		$localize['table_page_visit_num']       = esc_html__( 'Unique Pageviews', 'qa-heatmap-analytics' );
 		$localize['table_page_avg_stay_time']   = esc_html__( 'Avg. Time on Page', 'qa-heatmap-analytics' );
 		$localize['table_entrance_num']         = esc_html__( 'Entrance', 'qa-heatmap-analytics' );
@@ -105,12 +103,17 @@ class QAHM_Admin_Page_Dataviewer extends QAHM_Admin_Page_Base {
 		$localize['calender_kinou']      = esc_html_x( 'Yesterday', 'a word in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_kako7days']  = esc_html_x( 'Last 7 Days', 'words in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_kako30days'] = esc_html_x( 'Last 30 Days', 'words in a date range picker', 'qa-heatmap-analytics' );
+		$localize['calender_konshu']     = esc_html_x( 'This Week', 'words in a date range picker', 'qa-heatmap-analytics' );
+		$localize['calender_senshu']     = esc_html_x( 'Last Week', 'words in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_kongetsu']   = esc_html_x( 'This Month', 'words in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_sengetsu']   = esc_html_x( 'Last Month', 'words in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_erabu']      = esc_html_x( 'Custom Range', 'words in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_cancel']     = esc_html_x( 'Cancel', 'a word in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_ok']         = esc_html_x( 'Apply', 'a word in a date range picker', 'qa-heatmap-analytics' );
 		$localize['calender_kara']       = esc_html_x( '-', 'a connector between dates in a date range picker', 'qa-heatmap-analytics' );
+		// カレンダー UI（Cally アダプタ・縦スクロール版 #1317）の年/月クイックジャンプ用文言。
+		$localize['calender_select_year']  = esc_html_x( 'Select year', 'date range picker month/year quick-jump', 'qa-heatmap-analytics' );
+		$localize['calender_select_month'] = esc_html_x( 'Select month', 'date range picker month/year quick-jump', 'qa-heatmap-analytics' );
 
 		/* translators: placeholders represent the start and end dates for the download */
 		$localize['download_msg1'] = esc_html__( 'Download the data from %1$s to %2$s.', 'qa-heatmap-analytics' );
@@ -147,6 +150,8 @@ class QAHM_Admin_Page_Dataviewer extends QAHM_Admin_Page_Base {
 		$localize['switch_agent']             = esc_html__( 'Switch assistant', 'qa-heatmap-analytics' );
 		$localize['end_command_label']        = esc_html_x( 'End', 'Button label for ending the Assistants interaction', 'qa-heatmap-analytics' );
 		$localize['download_more_assistants'] = esc_html__( 'Browse More Assistants', 'qa-heatmap-analytics' );
+		// Issue #1580（検査 段2）: パッケージ検査の警告バッジ（警告のみモード）
+		$localize['pkg_check_warning']        = esc_html__( 'Package check: needs attention', 'qa-heatmap-analytics' );
 		$locale                               = get_locale();
 		if ( $this->wrap_strpos( $locale, 'ja' ) === 0 ) {
 			$localize['download_assistant_url'] = 'https://quarka.org/assistants';

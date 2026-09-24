@@ -39,7 +39,7 @@ try {
 	$info_ary  = $qahm_view_replay->get_contents_info( $info_path );
 
 	// ログイン判定
-	if ( ! $qahm_view_replay->check_access_role( 'qazero-view' ) ) {
+	if ( ! $qahm_view_replay->check_access_role( 'qahm_analytics' ) ) {
 		throw new Exception( 'You do not have access privileges.' );
 	}
 
@@ -181,7 +181,11 @@ try {
 		$user_ref = __( 'Unkown', 'qa-heatmap-analytics' );
 	}
 
-	if ( $user_is_new === 1 ) {
+	// #1568: 過去データ経路（create_replay_file_to_data_base）の info は is_new_user が
+	// 文字列（'1' 等）で保存されてきたため、厳密比較 === 1 が常に偽＝常に「リピーター」表示だった。
+	// 生成済みの info ファイルもあるため、表示側でも int へ正規化してから判定する。
+	// ※ 'Unknown'（キー欠損時の既定値）は (int) で 0 になり従来どおりリピーター側＝挙動不変。
+	if ( 1 === (int) $user_is_new ) {
 		$user_is_new = __( 'New User', 'qa-heatmap-analytics' );
 	} else {
 		$user_is_new = __( 'Returning User', 'qa-heatmap-analytics' );

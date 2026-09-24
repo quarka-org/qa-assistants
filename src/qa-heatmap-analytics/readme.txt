@@ -1,10 +1,10 @@
 === QA Assistants - Driven by data ===
 Contributors: QuarkA
 Tags: analytics, assistants, heatmap, insights, privacy-friendly
-Tested up to: 6.9
+Tested up to: 7.1
 Requires at least: 5.9
-Stable tag: 5.2.0.1
-Requires PHP: 7.0
+Stable tag: 5.3.0.0
+Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 Let your data speak — assistants with different perspectives help you understand your site, alongside heatmaps and replays.
@@ -136,6 +136,16 @@ Stay tuned for updates on the [official site](https://quarka.org/en-assistants/)
 
 == Changelog ==
 
+= 5.3.0.0 =
+*Release Date: September 8, 2026*
+
+- Improved charts, report tables, and date range selection for a better user experience
+- Enhanced the assistant framework to support a wider range of assistant experiences
+- Added support for collecting Google Search Console data for use by compatible assistants
+- Improved data processing accuracy and overall stability
+- Updated the minimum required PHP version to 7.4
+
+
 = 5.2.0.1 =
 *Release Date: July 28, 2026*
 
@@ -143,11 +153,20 @@ Stay tuned for updates on the [official site](https://quarka.org/en-assistants/)
 
 
 = 5.2.0.0 =
-*Release Date: April 24, 2026*
-
+*Release Date: April 24, 2026*  
 - UI improvements across the admin screens
 - Performance and internal improvements
 - Minor bug fixes
+
+
+= 5.1.4.1 =
+*Release Date: March 26, 2026*  
+- Fixed an issue where the plugin screen may not display correctly right after updating
+
+= 5.1.4.0 =
+*Release Date: March 26, 2026*  
+- Updated the "QA Assistants has been activated" page
+- Improved UI and text for a better user experience
 
 
 = 5.1.3.0 =

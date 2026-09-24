@@ -16,6 +16,35 @@ class QAHM_Db extends QAHM_File_Data {
 	public $last_error;
 
 	/**
+	 * view_pv 廃止 RM4-R1 PR-a #1408: R1 の index-free 経路（get_results_view_pv の date-range／pv_id、
+	 * get_vr_view_session の pv_id 経路）を view_pv 行ファイル読みから allpv 列DB（共有ビルダー
+	 * build_allpv_rows_for_date #1402/#1406）読みへ切り替えるフラグ。
+	 *
+	 * true で ON。ON の行は rm_r1_project_viewpv_row で view_pv 行（cron-proc 生成の29キー・型）へ忠実に
+	 * 射影する（TSV ダウンロード等、行キー＝列で消費する消費者があるため）。セッション復元は physical
+	 * adjacency 遡りでなく allpv ネイティブの session_id グループで行う（日跨ぎ境界の一致は #1406
+	 * daycross-verification.md で実証済み）。
+	 * 未 done／保持窓外／不整合を検出したら null で従来 view_pv 経路へ all-or-nothing フォールバック
+	 * （移行期の view_pv 併存・安全側）。OFF（既定）は従来経路を逐語温存＝本番ゼロ変化。
+	 * page_id／version_id where（view_pv index ファイル駆動）は PR-b（別 Issue）。
+	 */
+	const RM_R1_INDEXFREE_ALLPV_ENABLED = false;
+
+	/**
+	 * view_pv 廃止 RM4-R1 PR-b #1412: R1 の index 駆動経路（get_vr_view_session の page_id 経路・
+	 * get_results_view_pv の page_id 分岐〔ヒートマップ生成 view-heatmap が直接消費〕）を view_pv index
+	 * ファイル駆動から allpv 列DB（find_allpv_pv_ids_for_date #1406＝軽量列スキャン＋build_allpv_rows_for_date）
+	 * 読みへ切り替えるフラグ。
+	 *
+	 * version_id 分岐（get_results_view_pv）は実消費者なし（ヒートマップは 2023/12 に page_id+date クエリへ
+	 * 移行済み・コメントアウトで現存）＝移行対象外・P7-X で view_pv ごと退役。
+	 * page_id 分岐の date 無し呼び出しも実消費者なし＝ON 対象外（従来経路のまま）。
+	 * 忠実性の規約（view_pv 忠実 row アダプタ・all-or-nothing フォールバック・pv_id 昇順）は PR-a #1408 と共通。
+	 * OFF（既定）は従来経路を逐語温存＝本番ゼロ変化。
+	 */
+	const RM_R1_INDEX_PATHS_ALLPV_ENABLED = false;
+
+	/**
 	 * const
 	 */
 	const QAHM_VIEW_PV_COL = array(
@@ -347,6 +376,15 @@ class QAHM_Db extends QAHM_File_Data {
 		switch ( $id_type ) {
 
 			case 'page_id':
+				// view_pv 廃止 RM4-R1 PR-b #1412: ON は find（allpv 列スキャン）でアンカーを引き、
+				// session_id グループでセッションを復元する。null（未 done／不整合）なら従来 index 経路へ
+				// all-or-nothing フォールバック。
+				if ( self::RM_R1_INDEX_PATHS_ALLPV_ENABLED ) {
+					$rm_r1_ret = $this->rm_r1_vr_sessions_pageid_from_allpv( $tracking_id, $ids_ary, $column, $column_ary, $count, $verhist_dir, $s_daystr, $e_daystr );
+					if ( null !== $rm_r1_ret ) {
+						return $rm_r1_ret;
+					}
+				}
 				foreach ( $ids_ary as $id_num ) {
 
 					//indexファイルを探す
@@ -571,6 +609,14 @@ class QAHM_Db extends QAHM_File_Data {
 				break;
 
 			case 'pv_id':
+				// view_pv 廃止 RM4-R1 PR-a #1408: ON は allpv の session_id グループでセッションを復元する。
+				// null（未 done／保持窓外／不整合）なら従来 view_pv 経路へ all-or-nothing フォールバック。
+				if ( self::RM_R1_INDEXFREE_ALLPV_ENABLED ) {
+					$rm_r1_ret = $this->rm_r1_vr_sessions_from_allpv( $tracking_id, $ids_ary, $column, $column_ary, $count, $verhist_dir );
+					if ( null !== $rm_r1_ret ) {
+						return $rm_r1_ret;
+					}
+				}
 				$searched_pv_id = array();
 				$viewpv_dirlist = $this->wrap_dirlist( $viewpv_dir );
 				if ( ! $viewpv_dirlist ) {
@@ -786,10 +832,24 @@ class QAHM_Db extends QAHM_File_Data {
 	 * useful
 	 * Show column names of a given table.
 	 *
-	 * @phpcsSuppress WordPress.DB.PreparedSQL.NotPrepared
+	 * 列名を返せるのは view_pv / vr_view_pv（ファイル実体のテーブル）だけで、
+	 * それ以外のテーブルには空配列を返す。呼び出し元の select_data() は
+	 * $column !== '*' のときだけこの戻り値でカラム名を検証するため、
+	 * DB テーブルに対してカラム名を指定した問い合わせは行えない（'*' を使うこと）。
+	 *
+	 * #1305: ここには DB テーブル用の分岐があったが三重に壊れており
+	 * （定数の値側を回していて一致しない／SQL から SHOW が欠落／
+	 * オブジェクトを配列として読む）、必ず空配列を返していた。
+	 * 分岐自体は毎回実行されていたが、その結果（列名）を使う呼び出しが
+	 * 1つも無いことを確認したうえで削除した
+	 * ＝削除の前後で戻り値は全ての入力に対して同一。
+	 *
+	 * ⚠️ 将来ここに SHOW COLUMNS を正しく実装する場合は、テーブル名の
+	 * ホワイトリスト検証をこの関数側に持たせること。本関数は呼び出し元
+	 * select_data() のテーブル検証（401 die）より「前」に、未検証の
+	 * $table をそのまま受け取る位置で呼ばれている。
 	 */
 	public function show_column( $table ) {
-		global $wpdb;
 		$retary = array();
 		switch ( $table ) {
 			case 'view_pv':
@@ -801,20 +861,8 @@ class QAHM_Db extends QAHM_File_Data {
 				break;
 
 			default:
-				$is_table = false;
-				foreach ( QAHM_DB_OPTIONS as $table_ver_name ) {
-					$tablename = str_replace( '_version', '', $table_ver_name );
-					if ( $tablename === $table ) {
-						$is_table = true;
-					}
-				}
-				if ( $is_table ) {
-					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- SHOW COLUMNS is static query; identifiers fixed/whitelisted.
-					$res = $wpdb->get_results( ' columns from ' . $tablename );
-					foreach ( $res as $line ) {
-						$retary[] = $line['Field'];
-					}
-				}
+				// 上記2つ以外には列名を返さない（意図的に空配列）。
+				// ここに DB テーブル用の分岐があったが #1305 で撤去した。復活させないこと。
 				break;
 		}
 		return $retary;
@@ -859,6 +907,15 @@ class QAHM_Db extends QAHM_File_Data {
 		if ( preg_match( '/where access_time between.*([0-9]{4}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2}).*and.*([0-9]{4}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2})/i', $query, $date_strings ) ) {
 			$s_unixtime = $qahm_time->str_to_unixtime( $date_strings[1] );
 			$e_unixtime = $qahm_time->str_to_unixtime( $date_strings[2] );
+
+			// view_pv 廃止 RM4-R1 PR-a #1408: ON は allpv から OLD と同じ日包含規則で組み立てる。
+			// null（範囲内に未 done 日あり等）なら従来 view_pv 経路へ all-or-nothing フォールバック。
+			if ( self::RM_R1_INDEXFREE_ALLPV_ENABLED ) {
+				$rm_r1_ret = $this->rm_r1_results_daterange_from_allpv( $tracking_id, $date_strings[1], $date_strings[2], $s_unixtime, $e_unixtime, $columns_ary, $is_vr, $verhist_dir );
+				if ( null !== $rm_r1_ret ) {
+					return $rm_r1_ret;
+				}
+			}
 
 			foreach ( $allfiles as $file ) {
 				$filename = $file['name'];
@@ -931,6 +988,15 @@ class QAHM_Db extends QAHM_File_Data {
 			// where pv_id
 		} elseif ( preg_match( '/where pv_id = ([0-9]*)/i', $query, $pvidary ) ) {
 			$pv_id = (int) $pvidary[1];
+
+			// view_pv 廃止 RM4-R1 PR-a #1408: ON は qa_pv_log で pv_id→日付を解決し allpv から単一行を引く。
+			// null（保持窓外／未 done／行不在）なら従来 view_pv 経路へ all-or-nothing フォールバック。
+			if ( self::RM_R1_INDEXFREE_ALLPV_ENABLED ) {
+				$rm_r1_ret = $this->rm_r1_results_pvid_from_allpv( $tracking_id, $pv_id, $columns_ary );
+				if ( null !== $rm_r1_ret ) {
+					return $rm_r1_ret;
+				}
+			}
 			for ( $iii = 0; $iii < $this->wrap_count( $allfiles ); $iii++ ) {
 				$filename = $allfiles[ $iii ]['name'];
 				$fnameexp = $this->wrap_explode( '_', $filename );
@@ -1053,6 +1119,16 @@ class QAHM_Db extends QAHM_File_Data {
 				$end_utime      = $qahm_time->str_to_unixtime( $end_datetime );
 				$is_date        = true;
 			}
+
+			// view_pv 廃止 RM4-R1 PR-b #1412: ON は find（allpv 列スキャン）→ builder subset で行を引く
+			// （ヒートマップ生成 view-heatmap の消費経路）。date 無し呼び出しは実消費者ゼロ＝従来経路のまま。
+			// null（未 done／不整合）なら従来 index 経路へ all-or-nothing フォールバック。
+			if ( self::RM_R1_INDEX_PATHS_ALLPV_ENABLED ) {
+				$rm_r1_ret = $this->rm_r1_results_pageid_from_allpv( $tracking_id, $id, $is_date, $is_date ? $start_datetime : null, $is_date ? $end_datetime : null, $is_date ? $start_utime : 0, $is_date ? $end_utime : 0, $columns_ary );
+				if ( null !== $rm_r1_ret ) {
+					return $rm_r1_ret;
+				}
+			}
 			$idx_file = $this->get_index_file_contents( $viewpv_idx_dir, 'pageid', $id );
 			if ( ! $idx_file ) {
 				return false;
@@ -1135,12 +1211,778 @@ class QAHM_Db extends QAHM_File_Data {
 		}
 	}
 
+	/**
+	 * builder 行を view_pv 行（cron-proc 生成の29キー・順序・型）へ忠実に射影する（view_pv 廃止 RM4-R1 PR-a #1408）。
+	 *
+	 * R1 の返り行は TSV ダウンロード（admin-page-user.js＝行キーがそのまま列）や ajax_select_data（JSON 直結）で
+	 * 消費されるため、キー集合・順序・型を view_pv 行ファイルの行（cron-proc の $newary 構築）と一致させる。
+	 * - builder の superset キー（session_id / content_id / utm_content / os / browser）は落とす
+	 * - is_reject は view_pv 行に存在する（生成時に qa_readers から付与・reader 不明は null）ため、
+	 *   qa_readers 現在値マップから補完する（値で分岐する消費者は無し＝キー存在パリティ目的。
+	 *   現在値 vs 生成時スナップショットのドリフトは RM1/R2 で受容済みの flip 周知事項）
+	 * - 数値系は view_pv 同様 string 化（wpdb 由来型）。access_time / version_id のみ int（生成時に int 格納）
+	 *
+	 * @param array $row           build_allpv_rows_for_date の行.
+	 * @param array $is_reject_map reader_id(int) => is_reject（qa_readers 現在値）のマップ.
+	 * @return array view_pv 忠実行.
+	 */
+	private function rm_r1_project_viewpv_row( $row, $is_reject_map ) {
+		$reader_id = isset( $row['reader_id'] ) ? (int) $row['reader_id'] : 0;
+		return array(
+			'pv_id'         => isset( $row['pv_id'] ) ? (string) $row['pv_id'] : '',
+			'reader_id'     => (string) $reader_id,
+			'UAos'          => isset( $row['UAos'] ) ? (string) $row['UAos'] : '',
+			'UAbrowser'     => isset( $row['UAbrowser'] ) ? (string) $row['UAbrowser'] : '',
+			'language'      => isset( $row['language'] ) ? (string) $row['language'] : '',
+			'country_code'  => isset( $row['country_code'] ) ? (string) $row['country_code'] : '',
+			'is_reject'     => isset( $is_reject_map[ $reader_id ] ) ? $is_reject_map[ $reader_id ] : null,
+			'page_id'       => isset( $row['page_id'] ) ? (string) $row['page_id'] : '',
+			'url'           => isset( $row['url'] ) ? (string) $row['url'] : '',
+			'title'         => isset( $row['title'] ) ? (string) $row['title'] : '',
+			'access_time'   => isset( $row['access_time'] ) ? (int) $row['access_time'] : 0,
+			'device_id'     => isset( $row['device_id'] ) ? (string) $row['device_id'] : '',
+			'version_id'    => isset( $row['version_id'] ) ? (int) $row['version_id'] : 0,
+			'source_id'     => isset( $row['source_id'] ) ? (string) $row['source_id'] : '',
+			'utm_source'    => isset( $row['utm_source'] ) ? (string) $row['utm_source'] : '',
+			'source_domain' => isset( $row['source_domain'] ) ? (string) $row['source_domain'] : '',
+			'medium_id'     => isset( $row['medium_id'] ) ? (string) $row['medium_id'] : '',
+			'utm_medium'    => isset( $row['utm_medium'] ) ? (string) $row['utm_medium'] : '',
+			'campaign_id'   => isset( $row['campaign_id'] ) ? (string) $row['campaign_id'] : '',
+			'utm_campaign'  => isset( $row['utm_campaign'] ) ? (string) $row['utm_campaign'] : '',
+			'session_no'    => isset( $row['session_no'] ) ? $row['session_no'] : '',
+			'pv'            => isset( $row['pv'] ) ? (string) $row['pv'] : '',
+			'speed_msec'    => isset( $row['speed_msec'] ) ? (string) $row['speed_msec'] : '',
+			'browse_sec'    => isset( $row['browse_sec'] ) ? (string) $row['browse_sec'] : '',
+			'is_last'       => isset( $row['is_last'] ) ? (string) $row['is_last'] : '',
+			'is_newuser'    => isset( $row['is_newuser'] ) ? (string) $row['is_newuser'] : '',
+			'is_raw_p'      => isset( $row['is_raw_p'] ) ? $row['is_raw_p'] : '',
+			'is_raw_c'      => isset( $row['is_raw_c'] ) ? $row['is_raw_c'] : '',
+			'is_raw_e'      => isset( $row['is_raw_e'] ) ? $row['is_raw_e'] : '',
+		);
+	}
+
+	/**
+	 * qa_pv_log の access_time（datetime 文字列）から 'Ymd' 8桁を得る（RM4-R1 PR-a #1408）。
+	 *
+	 * qa_pv_log access_time は view_pv 日ファイル・allpv 変換と同一の暦日バケット源なので、
+	 * この導出日は OLD がその pv を収めていた日ファイルの日付と一致する。
+	 *
+	 * @param mixed $access_time qa_pv_log 格納の datetime 文字列.
+	 * @return string|null 'Ymd' 8桁。形式不正は null.
+	 */
+	private function rm_r1_ymd_from_access_time( $access_time ) {
+		if ( ! is_string( $access_time ) || $this->wrap_strlen( $access_time ) < 10 ) {
+			return null;
+		}
+		$ymd = str_replace( '-', '', $this->wrap_substr( $access_time, 0, 10 ) );
+		return ( 8 === $this->wrap_strlen( $ymd ) ) ? $ymd : null;
+	}
+
+	/**
+	 * allpv データセットディレクトリ（Issue #1420 nodata 判定用・load_allpv_columns と同一規則）。
+	 *
+	 * @param string $tracking_id トラッキングID.
+	 * @return string
+	 */
+	private function get_allpv_dataset_dir( $tracking_id ) {
+		return $this->get_data_dir_path() . 'report/' . $this->get_safe_tracking_id( $tracking_id ) . '/columns-db/allpv/';
+	}
+
+	/**
+	 * その日が「データ無し日（manifest done rows=0 マーカー）」か（Issue #1420）。
+	 *
+	 * フラグ（QAHM_ColumnDB_Manifest::NODATA_DAY_MANIFEST_ENABLED）OFF では常に false。
+	 * ColumnDB ON リーダー（builder/find/RM3/RM1）が「null＝未 done」と「データ無し日＝行0件」を
+	 * 区別するための共通入口。
+	 *
+	 * @param string $tracking_id トラッキングID.
+	 * @param string $date_ymd    YYYYMMDD.
+	 * @return bool
+	 */
+	public function is_allpv_nodata_day( $tracking_id, $date_ymd ) {
+		if ( ! class_exists( 'QAHM_ColumnDB_Manifest' ) ) {
+			return false;
+		}
+		return QAHM_ColumnDB_Manifest::is_nodata_day( $this->get_allpv_dataset_dir( $tracking_id ), (string) $date_ymd );
+	}
+
+	/**
+	 * nodata スキャンが永続化した「最古データ証跡日」境界を返す（Issue #1420）。
+	 *
+	 * 境界より前の日は「その tid にデータが存在し始める前」＝OLD もファイル不在で読まない＝寄与ゼロ扱いにできる。
+	 * フラグ OFF・スキャン未実行（メタ不在）は null＝呼び出し側はクランプしない（従来どおりフォールバック）。
+	 *
+	 * @param string $tracking_id トラッキングID.
+	 * @return string|null YYYYMMDD or null.
+	 */
+	public function get_allpv_nodata_boundary( $tracking_id ) {
+		if ( ! class_exists( 'QAHM_ColumnDB_Manifest' ) || ! QAHM_ColumnDB_Manifest::NODATA_DAY_MANIFEST_ENABLED ) {
+			return null;
+		}
+		$meta = QAHM_ColumnDB_Manifest::load_scan_meta( $this->get_allpv_dataset_dir( $tracking_id ) );
+		return ( false !== $meta ) ? (string) $meta['boundary'] : null;
+	}
+
+	/**
+	 * date-range 分岐の allpv 版（view_pv 廃止 RM4-R1 PR-a #1408）。
+	 *
+	 * 日の包含規則は OLD（L: where access_time between 分岐）を bug-for-bug 再現する（着手前レビュー 🟡-1）:
+	 * 「日 D の 00:00:00 を $qahm_time->str_to_unixtime した値が [s,e] 内なら日 D を丸ごと採用」。
+	 * S 日の 00:00 が範囲開始前なら S 日は除外・行レベルの時刻フィルタは無い（OLD のファイル単位粒度そのまま）。
+	 * ※ R2（get_recent_sessions）の DateTime サイト暦日列挙とは別流儀＝流用しない。
+	 * `'*'` のネストは OLD の「ファイル単位」に対し ON は「日単位」（多ファイル日のみ粒度差・全消費者 flat 後
+	 * 使用で吸収・RM4-R2 ⚪-1 同 class）。
+	 *
+	 * @return int|array|null count は int・行は array。範囲内に未 done 日があれば null（呼び出し側フォールバック）.
+	 */
+	private function rm_r1_results_daterange_from_allpv( $tracking_id, $s_str, $e_str, $s_unixtime, $e_unixtime, $columns_ary, $is_vr, $verhist_dir ) {
+		global $qahm_time, $qahm_file_functions;
+		if ( ! is_object( $qahm_file_functions ) || ! method_exists( $qahm_file_functions, 'build_allpv_rows_for_date' ) ) {
+			return null;
+		}
+		if ( ! preg_match( '/^([0-9]{4}).([0-9]{2}).([0-9]{2})/', $s_str, $s_parts ) || ! preg_match( '/^([0-9]{4}).([0-9]{2}).([0-9]{2})/', $e_str, $e_parts ) ) {
+			return null;
+		}
+
+		// 候補日ラベルを純カレンダー演算で列挙し、OLD と同じ判定（D 00:00:00 の unixtime ∈ [s,e]）で採否を決める。
+		$included_days = array();
+		$y = (int) $s_parts[1];
+		$m = (int) $s_parts[2];
+		$d = (int) $s_parts[3];
+		$end_label = sprintf( '%04d-%02d-%02d', (int) $e_parts[1], (int) $e_parts[2], (int) $e_parts[3] );
+		$guard = 0;
+		while ( true ) {
+			$label = sprintf( '%04d-%02d-%02d', $y, $m, $d );
+			$f_unixtime = $qahm_time->str_to_unixtime( $label . ' 00:00:00' );
+			if ( $s_unixtime <= $f_unixtime && $f_unixtime <= $e_unixtime ) {
+				$included_days[] = $label;
+			}
+			if ( $label >= $end_label ) {
+				break;
+			}
+			if ( ++$guard > 36600 ) { // 100年ガード（暴走防止）
+				return null;
+			}
+			$next = gmmktime( 0, 0, 0, $m, $d + 1, $y );
+			$y = (int) gmdate( 'Y', $next );
+			$m = (int) gmdate( 'n', $next );
+			$d = (int) gmdate( 'j', $next );
+		}
+
+		// 各日を builder で組み立て（1日でも null＝真の未 done なら全体フォールバック）。
+		// Issue #1420: データ無し日（done rows=0＝builder が空配列）と境界（最古データ証跡日）前の日は
+		// 「寄与ゼロ」で続行＝OLD はファイル不在の日を読まない（寄与ゼロ）ので等価。
+		// '*' のネストも足さない（OLD＝ファイル無し＝ネスト無し）。
+		$nodata_boundary = $this->get_allpv_nodata_boundary( $tracking_id );
+		$day_rows_ary    = array();
+		$reader_ids      = array();
+		foreach ( $included_days as $label ) {
+			$ymd  = str_replace( '-', '', $label );
+			$rows = $qahm_file_functions->build_allpv_rows_for_date( $tracking_id, $ymd );
+			if ( ! is_array( $rows ) ) {
+				if ( null !== $nodata_boundary && $ymd < $nodata_boundary ) {
+					continue;
+				}
+				return null;
+			}
+			if ( ! $rows ) {
+				continue;
+			}
+			// allpv の物理行順はセッション連続順（列DB のセッション隣接格納）。view_pv ファイルは
+			// 生成 SELECT の PK 順＝pv_id 昇順なので、OLD の行順（TSV ダウンロード等の見た目順）に合わせて sort する。
+			usort(
+				$rows,
+				function ( $a, $b ) {
+					return $a['pv_id'] <=> $b['pv_id'];
+				}
+			);
+			$day_rows_ary[ $label ] = $rows;
+			foreach ( $rows as $r ) {
+				$reader_ids[ (int) $r['reader_id'] ] = true;
+			}
+		}
+		$is_reject_map = QAHM_DB_Functions::get_readers_is_reject( array_keys( $reader_ids ) );
+
+		$countall    = 0;
+		$results_ary = array();
+		foreach ( $day_rows_ary as $label => $rows ) {
+			if ( empty( $rows ) ) {
+				continue; // OLD はデータの無い日はファイル自体が無い＝何も加えない
+			}
+			switch ( $columns_ary[0] ) {
+				case 'count':
+					if ( $columns_ary[1] === '*' ) {
+						$countall = $countall + $this->wrap_count( $rows );
+					} else {
+						foreach ( $rows as $r ) {
+							$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+							if ( isset( $faithful[ $columns_ary[1] ] ) && $faithful[ $columns_ary[1] ] ) {
+								++$countall;
+							}
+						}
+					}
+					break;
+
+				case '*':
+					$day_ary = array();
+					foreach ( $rows as $r ) {
+						$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+						if ( $is_vr ) {
+							// OLD（date-range '*'）は version_id の truthy を見ずに verhist を読む＝忠実再現
+							$verhist_file = $this->wrap_get_contents( $verhist_dir . $faithful['version_id'] . '_version.php' );
+							if ( $verhist_file ) {
+								$verhist_ary            = $this->wrap_unserialize( $verhist_file );
+								$faithful['version_no'] = $verhist_ary[0]->version_no;
+							}
+						}
+						$day_ary[] = $faithful;
+					}
+					$results_ary[] = $day_ary;
+					break;
+
+				default:
+					foreach ( $rows as $r ) {
+						$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+						$lineary  = array();
+						foreach ( $columns_ary as $column ) {
+							if ( $is_vr && 'version_no' === $column ) {
+								$verhist_file = $this->wrap_get_contents( $verhist_dir . $faithful['version_id'] . '_version.php' );
+								if ( $verhist_file ) {
+									$verhist_ary        = $this->wrap_unserialize( $verhist_file );
+									$lineary[ $column ] = $verhist_ary[0]->version_no;
+								}
+							} else {
+								$lineary[ $column ] = isset( $faithful[ $column ] ) ? $faithful[ $column ] : null;
+							}
+						}
+						$results_ary[] = $lineary;
+					}
+					break;
+			}
+		}
+
+		if ( $columns_ary[0] === 'count' ) {
+			return $countall;
+		}
+		return $results_ary;
+	}
+
+	/**
+	 * pv_id 分岐の allpv 版（view_pv 廃止 RM4-R1 PR-a #1408）。
+	 *
+	 * OLD はファイル名の pv_id レンジで日ファイルを引く。ON は qa_pv_log で pv_id→日付を解決し、
+	 * allpv の subset build（PR-0 の $pv_id_filter）で単一行を得る。
+	 * ※ OLD の pv_id 分岐は is_vr でも version_no を補完しない＝ON も補完しない（忠実）。
+	 *
+	 * @return int|array|null count は int・行は array。保持窓外／未 done／行不在は null（フォールバック）.
+	 */
+	private function rm_r1_results_pvid_from_allpv( $tracking_id, $pv_id, $columns_ary ) {
+		global $qahm_file_functions;
+		if ( ! is_object( $qahm_file_functions ) || ! method_exists( $qahm_file_functions, 'build_allpv_rows_for_date' ) ) {
+			return null;
+		}
+		$at_map = QAHM_DB_Functions::get_pv_log_access_time( array( $pv_id ) );
+		if ( ! isset( $at_map[ $pv_id ] ) ) {
+			return null;
+		}
+		$ymd = $this->rm_r1_ymd_from_access_time( $at_map[ $pv_id ] );
+		if ( null === $ymd ) {
+			return null;
+		}
+		$rows = $qahm_file_functions->build_allpv_rows_for_date( $tracking_id, $ymd, array( $pv_id ) );
+		if ( ! is_array( $rows ) || 1 !== $this->wrap_count( $rows ) ) {
+			// 日は done なのに行が無い＝不整合（tid 違い含む）。保守的に従来経路へ
+			return null;
+		}
+		$is_reject_map = QAHM_DB_Functions::get_readers_is_reject( array( (int) $rows[0]['reader_id'] ) );
+		$faithful      = $this->rm_r1_project_viewpv_row( $rows[0], $is_reject_map );
+
+		switch ( $columns_ary[0] ) {
+			case 'count':
+				if ( $columns_ary[1] === '*' ) {
+					return 1;
+				}
+				return ( isset( $faithful[ $columns_ary[1] ] ) && $faithful[ $columns_ary[1] ] ) ? 1 : 0;
+
+			case '*':
+				return array( $faithful );
+
+			default:
+				$lineary = array();
+				foreach ( $columns_ary as $column ) {
+					$lineary[ $column ] = isset( $faithful[ $column ] ) ? $faithful[ $column ] : null;
+				}
+				return array( $lineary );
+		}
+	}
+
+	/**
+	 * get_vr_view_session pv_id 経路の allpv 版（view_pv 廃止 RM4-R1 PR-a #1408）。
+	 *
+	 * セッション復元は OLD の physical adjacency 遡り／前進でなく、allpv ネイティブの session_id グループで行う
+	 * （境界一致は #1406 daycross-verification.md で実証）。OLD の観測可能な挙動を再現する:
+	 * - 出力順＝ids_ary 順に「未出力のセッション」を追加（OLD の searched_pv_id skip と同効果の session 単位 dedup）
+	 * - セッション内の行順＝pv_id 昇順（OLD のファイル物理順と同一）
+	 * - is_last 強制＝OLD はセッション打ち切り点（reader 変化／ファイル末尾）で最終行の is_last を '1' に強制する
+	 *   （column 射影行にもキーを追加する）。末尾行の生 is_last が truthy（真のセッション終端）なら強制しない
+	 * - version_no は version_id truthy のときだけ verhist を読む（OLD の vr_view_session 側の規則）
+	 *
+	 * @return int|array|null count は int・セッション配列は array。解決不能（保持窓外／未 done／不整合）は null.
+	 */
+	private function rm_r1_vr_sessions_from_allpv( $tracking_id, $ids_ary, $column, $column_ary, $count, $verhist_dir ) {
+		global $qahm_file_functions;
+		if ( ! is_object( $qahm_file_functions ) || ! method_exists( $qahm_file_functions, 'build_allpv_rows_for_date' ) ) {
+			return null;
+		}
+
+		// pv_id → 日付解決。1つでも解決できなければ全体フォールバック（all-or-nothing）
+		$int_ids = array();
+		foreach ( $ids_ary as $id ) {
+			$int_ids[] = (int) $id;
+		}
+		$at_map = QAHM_DB_Functions::get_pv_log_access_time( $int_ids );
+		$ymd_by_id = array();
+		foreach ( $int_ids as $id ) {
+			if ( ! isset( $at_map[ $id ] ) ) {
+				return null;
+			}
+			$ymd = $this->rm_r1_ymd_from_access_time( $at_map[ $id ] );
+			if ( null === $ymd ) {
+				return null;
+			}
+			$ymd_by_id[ $id ] = $ymd;
+		}
+
+		// 日ごとに全行を組み立て（セッション復元には日の全行が要る）
+		$day_rows   = array();
+		$reader_ids = array();
+		foreach ( array_unique( $ymd_by_id ) as $ymd ) {
+			$rows = $qahm_file_functions->build_allpv_rows_for_date( $tracking_id, $ymd );
+			if ( ! is_array( $rows ) ) {
+				return null;
+			}
+			// allpv の物理行順はセッション連続順。OLD のファイル物理順（pv_id 昇順）に合わせて sort し、
+			// セッション内の行順を OLD と一致させる（date-range 側と同じ規約）。
+			usort(
+				$rows,
+				function ( $a, $b ) {
+					return $a['pv_id'] <=> $b['pv_id'];
+				}
+			);
+			$day_rows[ $ymd ] = $rows;
+			foreach ( $rows as $r ) {
+				$reader_ids[ (int) $r['reader_id'] ] = true;
+			}
+		}
+		$is_reject_map = QAHM_DB_Functions::get_readers_is_reject( array_keys( $reader_ids ) );
+
+		// pv_id → セッションキー／セッションキー → 行リスト（allpv 行順＝pv_id 昇順）
+		$pv_to_session = array();
+		$session_rows  = array();
+		foreach ( $day_rows as $ymd => $rows ) {
+			foreach ( $rows as $r ) {
+				$skey = $ymd . '|' . ( isset( $r['session_id'] ) ? (int) $r['session_id'] : 0 );
+				$pv_to_session[ (int) $r['pv_id'] ] = $skey;
+				$session_rows[ $skey ][] = $r;
+			}
+		}
+
+		$ret_cnt = 0;
+		$ret_ary = array();
+		$emitted = array();
+		foreach ( $int_ids as $id ) {
+			if ( ! isset( $pv_to_session[ $id ] ) ) {
+				// 日は done なのに行が無い＝不整合（tid 違い含む）。保守的に従来経路へ
+				return null;
+			}
+			$skey = $pv_to_session[ $id ];
+			if ( isset( $emitted[ $skey ] ) ) {
+				continue; // 同一セッションの重複 id（OLD の searched_pv_id skip と同効果）
+			}
+			$emitted[ $skey ] = true;
+			$rows = $session_rows[ $skey ];
+
+			if ( $count ) {
+				$ret_cnt += $this->wrap_count( $rows );
+				continue;
+			}
+
+			$last_i      = $this->wrap_count( $rows ) - 1;
+			$genuine_end = ! empty( $rows[ $last_i ]['is_last'] );
+			$session_ary = array();
+			foreach ( $rows as $r ) {
+				$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+				if ( $column === '*' ) {
+					if ( $faithful['version_id'] ) {
+						$verhist_file = $this->wrap_get_contents( $verhist_dir . $faithful['version_id'] . '_version.php' );
+						if ( $verhist_file ) {
+							$verhist_ary            = $this->wrap_unserialize( $verhist_file );
+							$faithful['version_no'] = $verhist_ary[0]->version_no;
+						}
+					}
+					$session_ary[] = $faithful;
+				} else {
+					$temp_ary = array();
+					foreach ( $column_ary as $column_val ) {
+						if ( 'version_no' === $column_val ) {
+							if ( $faithful['version_id'] ) {
+								$verhist_file = $this->wrap_get_contents( $verhist_dir . $faithful['version_id'] . '_version.php' );
+								if ( $verhist_file ) {
+									$verhist_ary             = $this->wrap_unserialize( $verhist_file );
+									$temp_ary[ $column_val ] = $verhist_ary[0]->version_no;
+								}
+							}
+						} else {
+							$temp_ary[ $column_val ] = isset( $faithful[ $column_val ] ) ? $faithful[ $column_val ] : null;
+						}
+					}
+					$session_ary[] = $temp_ary;
+				}
+			}
+			if ( ! $genuine_end && ! empty( $session_ary ) ) {
+				$session_ary_last_keynum                            = $this->wrap_count( $session_ary ) - 1;
+				$session_ary[ $session_ary_last_keynum ]['is_last'] = '1';
+			}
+			$ret_ary[] = $session_ary;
+		}
+
+		if ( $count ) {
+			return $ret_cnt;
+		}
+		return $ret_ary;
+	}
+
+	/**
+	 * 日付ラベル（'Y-m-d'）を s..e（両端含む）で列挙する（view_pv 廃止 RM4-R1 PR-b #1412）。
+	 *
+	 * 純カレンダー演算（gmmktime＝UTC 一貫の日送り）でラベルのみ生成する。範囲への包含判定
+	 * （00:00 判定／23:59:59 判定など経路ごとの癖）は呼び出し側が行う。
+	 *
+	 * @param string $s_str 開始日を先頭に含む文字列（'YYYY?MM?DD...'・区切り任意）.
+	 * @param string $e_str 終了日を先頭に含む文字列.
+	 * @return array|null ラベル配列。形式不正・範囲異常（100年超）は null.
+	 */
+	private function rm_r1_enumerate_day_labels( $s_str, $e_str ) {
+		if ( ! preg_match( '/^([0-9]{4}).([0-9]{2}).([0-9]{2})/', (string) $s_str, $s_parts ) || ! preg_match( '/^([0-9]{4}).([0-9]{2}).([0-9]{2})/', (string) $e_str, $e_parts ) ) {
+			return null;
+		}
+		$labels    = array();
+		$y         = (int) $s_parts[1];
+		$m         = (int) $s_parts[2];
+		$d         = (int) $s_parts[3];
+		$end_label = sprintf( '%04d-%02d-%02d', (int) $e_parts[1], (int) $e_parts[2], (int) $e_parts[3] );
+		if ( $end_label < sprintf( '%04d-%02d-%02d', $y, $m, $d ) ) {
+			// 逆転範囲（end < start）は null＝従来経路へフォールバック（OLD の DatePeriod は0回転で空を返す＝
+			// フォールバック先の OLD がその空を返すことで出力一致。セルフレビュー 🟡-1）
+			return null;
+		}
+		$guard     = 0;
+		while ( true ) {
+			$label    = sprintf( '%04d-%02d-%02d', $y, $m, $d );
+			$labels[] = $label;
+			if ( $label >= $end_label ) {
+				break;
+			}
+			if ( ++$guard > 36600 ) { // 100年ガード（暴走防止）
+				return null;
+			}
+			$next = gmmktime( 0, 0, 0, $m, $d + 1, $y );
+			$y    = (int) gmdate( 'Y', $next );
+			$m    = (int) gmdate( 'n', $next );
+			$d    = (int) gmdate( 'j', $next );
+		}
+		return $labels;
+	}
+
+	/**
+	 * セッション（builder 行のリスト）を get_vr_view_session の出力形へ射影する（view_pv 廃止 RM4-R1 PR-b #1412）。
+	 *
+	 * PR-a の rm_r1_vr_sessions_from_allpv 内の射影ループと同一規約（意図的な同型・PR-a 検証済みコードを
+	 * 触らないため新設）:
+	 * - 忠実 row アダプタ（rm_r1_project_viewpv_row）で view_pv 行へ射影
+	 * - version_no は version_id truthy のときだけ verhist を読む（vr_view_session 側の規則）
+	 * - is_last 強制＝末尾行の生 is_last が falsy（打ち切りセッション）のときだけ '1' を設定
+	 *   （column 射影行にもキーを追加＝OLD の打ち切り点 mutation と同じ）
+	 *
+	 * @param array  $rows          セッションの builder 行（pv_id 昇順）.
+	 * @param string $column        '*' または列リスト（空白除去済み）.
+	 * @param array  $column_ary    列配列.
+	 * @param string $verhist_dir   version_hist ディレクトリ.
+	 * @param array  $is_reject_map reader_id => is_reject マップ.
+	 * @return array 射影済みセッション（行配列）.
+	 */
+	private function rm_r1_project_session( $rows, $column, $column_ary, $verhist_dir, $is_reject_map ) {
+		$last_i      = $this->wrap_count( $rows ) - 1;
+		$genuine_end = ! empty( $rows[ $last_i ]['is_last'] );
+		$session_ary = array();
+		foreach ( $rows as $r ) {
+			$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+			if ( $column === '*' ) {
+				if ( $faithful['version_id'] ) {
+					$verhist_file = $this->wrap_get_contents( $verhist_dir . $faithful['version_id'] . '_version.php' );
+					if ( $verhist_file ) {
+						$verhist_ary            = $this->wrap_unserialize( $verhist_file );
+						$faithful['version_no'] = $verhist_ary[0]->version_no;
+					}
+				}
+				$session_ary[] = $faithful;
+			} else {
+				$temp_ary = array();
+				foreach ( $column_ary as $column_val ) {
+					if ( 'version_no' === $column_val ) {
+						if ( $faithful['version_id'] ) {
+							$verhist_file = $this->wrap_get_contents( $verhist_dir . $faithful['version_id'] . '_version.php' );
+							if ( $verhist_file ) {
+								$verhist_ary             = $this->wrap_unserialize( $verhist_file );
+								$temp_ary[ $column_val ] = $verhist_ary[0]->version_no;
+							}
+						}
+					} else {
+						$temp_ary[ $column_val ] = isset( $faithful[ $column_val ] ) ? $faithful[ $column_val ] : null;
+					}
+				}
+				$session_ary[] = $temp_ary;
+			}
+		}
+		if ( ! $genuine_end && ! empty( $session_ary ) ) {
+			$session_ary_last_keynum                            = $this->wrap_count( $session_ary ) - 1;
+			$session_ary[ $session_ary_last_keynum ]['is_last'] = '1';
+		}
+		return $session_ary;
+	}
+
+	/**
+	 * get_vr_view_session page_id 経路の allpv 版（view_pv 廃止 RM4-R1 PR-b #1412）。
+	 *
+	 * OLD＝pageid index ファイル駆動（date_period × index 日付の交差→ファイル走査→physical adjacency 復元）。
+	 * ON＝日ラベル列挙（s..e 全日）→ find_allpv_pv_ids_for_date（軽量列スキャン・#1406 の初消費）で
+	 * 「対象 page のアンカーがある日」を判定 → ある日だけ builder 全行 → session_id グループ →
+	 * アンカー（matched pv）を含むセッションを出力。
+	 *
+	 * OLD の観測可能挙動の再現:
+	 * - 出力順＝page_id（ids_ary）順 → 日付昇順 → アンカー pv_id 昇順
+	 * - セッション単位 dedup（OLD の searched_pv_id skip＋ret_ary 先頭 pv_id 比較の実効と同じ。
+	 *   OLD が interleave 時に非連続再アンカーで count を二重加算しうる緩さは再現しない＝ON がより正確・flip 周知）
+	 * - page_id > 10,000,000 は OLD が全体 null（search_max）＝ON も null（従来経路に落ち OLD が null を返す＝一致）
+	 * - 期間内にアンカーなし＝空配列／count 0（OLD の index 範囲外と同じ）
+	 *
+	 * @return int|array|null count は int・セッション配列は array。未 done／不整合は null（フォールバック）.
+	 */
+	private function rm_r1_vr_sessions_pageid_from_allpv( $tracking_id, $ids_ary, $column, $column_ary, $count, $verhist_dir, $s_daystr, $e_daystr ) {
+		global $qahm_file_functions;
+		if ( ! is_object( $qahm_file_functions ) || ! method_exists( $qahm_file_functions, 'find_allpv_pv_ids_for_date' ) ) {
+			return null;
+		}
+		$search_max = 10000000;
+		$page_ids   = array();
+		foreach ( $ids_ary as $id_num ) {
+			if ( (int) $id_num > $search_max ) {
+				return null;
+			}
+			$page_ids[] = (int) $id_num;
+		}
+		$labels = $this->rm_r1_enumerate_day_labels( $s_daystr, $e_daystr );
+		if ( null === $labels ) {
+			return null;
+		}
+
+		// 日ごと: find でアンカー有無を判定 → ある日だけ全行 builder（セッション復元には日の全行が要る）
+		$anchor_by_day = array();
+		$day_rows      = array();
+		$reader_ids    = array();
+		foreach ( $labels as $label ) {
+			$ymd     = str_replace( '-', '', $label );
+			$matched = $qahm_file_functions->find_allpv_pv_ids_for_date( $tracking_id, $ymd, 'page_id', $page_ids );
+			if ( null === $matched ) {
+				return null; // 未 done 日（データ無し日含む）＝all-or-nothing で従来経路へ
+			}
+			if ( empty( $matched ) ) {
+				continue;
+			}
+			sort( $matched );
+			$rows = $qahm_file_functions->build_allpv_rows_for_date( $tracking_id, $ymd );
+			if ( ! is_array( $rows ) ) {
+				return null;
+			}
+			usort(
+				$rows,
+				function ( $a, $b ) {
+					return $a['pv_id'] <=> $b['pv_id'];
+				}
+			);
+			$anchor_by_day[ $label ] = $matched;
+			$day_rows[ $label ]      = $rows;
+			foreach ( $rows as $r ) {
+				$reader_ids[ (int) $r['reader_id'] ] = true;
+			}
+		}
+		if ( empty( $anchor_by_day ) ) {
+			return $count ? 0 : array();
+		}
+		$is_reject_map = QAHM_DB_Functions::get_readers_is_reject( array_keys( $reader_ids ) );
+
+		// pv_id → セッションキー／セッション → 行リスト／pv_id → page_id
+		$pv_to_session = array();
+		$session_rows  = array();
+		$page_of_pv    = array();
+		foreach ( $day_rows as $label => $rows ) {
+			$ymd = str_replace( '-', '', $label );
+			foreach ( $rows as $r ) {
+				$skey = $ymd . '|' . ( isset( $r['session_id'] ) ? (int) $r['session_id'] : 0 );
+				$pv_to_session[ (int) $r['pv_id'] ] = $skey;
+				$session_rows[ $skey ][]            = $r;
+				$page_of_pv[ (int) $r['pv_id'] ]    = (int) $r['page_id'];
+			}
+		}
+
+		$ret_cnt = 0;
+		$ret_ary = array();
+		$emitted = array();
+		foreach ( $page_ids as $pid ) {
+			foreach ( $anchor_by_day as $label => $matched ) {
+				foreach ( $matched as $anchor_pv ) {
+					if ( ! isset( $page_of_pv[ $anchor_pv ] ) || $page_of_pv[ $anchor_pv ] !== $pid ) {
+						continue; // matched は複数 page 混在＝この page のアンカーだけを処理（ids_ary 順の再現）
+					}
+					if ( ! isset( $pv_to_session[ $anchor_pv ] ) ) {
+						return null; // 不整合（find と builder の食い違い）＝従来経路へ
+					}
+					$skey = $pv_to_session[ $anchor_pv ];
+					if ( isset( $emitted[ $skey ] ) ) {
+						continue; // セッション単位 dedup
+					}
+					$emitted[ $skey ] = true;
+					$rows             = $session_rows[ $skey ];
+					if ( $count ) {
+						$ret_cnt += $this->wrap_count( $rows );
+						continue;
+					}
+					$ret_ary[] = $this->rm_r1_project_session( $rows, $column, $column_ary, $verhist_dir, $is_reject_map );
+				}
+			}
+		}
+		if ( $count ) {
+			return $ret_cnt;
+		}
+		return $ret_ary;
+	}
+
+	/**
+	 * get_results_view_pv page_id 分岐の allpv 版（view_pv 廃止 RM4-R1 PR-b #1412）。
+	 *
+	 * 実消費者＝ヒートマップ生成（class-qahm-view-heatmap.php create_heatmap_file＝
+	 * `WHERE page_id = %d and access_time between %s and %s`・columns 射影・date 付き）。
+	 *
+	 * OLD の観測可能挙動の再現:
+	 * - 日の包含判定＝**`str_to_unixtime( D . ' 23:59:59' ) ∈ [start, end]`**（OLD の pageid index 日付フィルタを
+	 *   bug-for-bug。date-range 分岐の 00:00 判定とは別の癖＝start 日は常に含み・end 日は end が 23:59:59 の時だけ含む）
+	 * - count(col) は **isset 判定**（date-range 分岐の truthy 判定と異なる・OLD 忠実）
+	 * - version_no 補完なし（OLD の page_id 分岐に version_no ケースは無い）
+	 * - 行順＝日付昇順 → pv_id 昇順（OLD の index 順と同じ）・`'*'`／columns とも flat
+	 * - date 無し呼び出し＝実消費者ゼロ＝null（従来経路のまま・移行しない）
+	 * - 範囲内にアンカーなし＝空配列／count 0（OLD の「index あり・範囲外」と同じ。OLD は page が全履歴で
+	 *   未出現だと false を返すが、消費者（heatmap）は truthy チェックのみ＝実害なし・意図的差分として記録）
+	 *
+	 * @return int|array|null count は int・行は array。date 無し／未 done／不整合は null（フォールバック）.
+	 */
+	private function rm_r1_results_pageid_from_allpv( $tracking_id, $page_id, $is_date, $start_datetime, $end_datetime, $start_utime, $end_utime, $columns_ary ) {
+		global $qahm_time, $qahm_file_functions;
+		if ( ! $is_date ) {
+			return null;
+		}
+		if ( ! is_object( $qahm_file_functions ) || ! method_exists( $qahm_file_functions, 'find_allpv_pv_ids_for_date' ) ) {
+			return null;
+		}
+		$labels = $this->rm_r1_enumerate_day_labels( $start_datetime, $end_datetime );
+		if ( null === $labels ) {
+			return null;
+		}
+
+		// 各日: OLD の包含判定（D 23:59:59 ∈ [start, end]）→ find → builder subset
+		$day_rows_ary = array();
+		$reader_ids   = array();
+		foreach ( $labels as $label ) {
+			$now_utime = $qahm_time->str_to_unixtime( $label . ' 23:59:59' );
+			if ( $now_utime < $start_utime || $end_utime < $now_utime ) {
+				continue;
+			}
+			$ymd     = str_replace( '-', '', $label );
+			$matched = $qahm_file_functions->find_allpv_pv_ids_for_date( $tracking_id, $ymd, 'page_id', array( (int) $page_id ) );
+			if ( null === $matched ) {
+				return null; // 未 done 日＝all-or-nothing で従来経路へ
+			}
+			if ( empty( $matched ) ) {
+				continue;
+			}
+			sort( $matched );
+			$rows = $qahm_file_functions->build_allpv_rows_for_date( $tracking_id, $ymd, $matched );
+			if ( ! is_array( $rows ) || $this->wrap_count( $rows ) !== $this->wrap_count( $matched ) ) {
+				return null; // 不整合＝従来経路へ
+			}
+			usort(
+				$rows,
+				function ( $a, $b ) {
+					return $a['pv_id'] <=> $b['pv_id'];
+				}
+			);
+			$day_rows_ary[ $label ] = $rows;
+			foreach ( $rows as $r ) {
+				$reader_ids[ (int) $r['reader_id'] ] = true;
+			}
+		}
+		$is_reject_map = QAHM_DB_Functions::get_readers_is_reject( array_keys( $reader_ids ) );
+
+		$countall    = 0;
+		$results_ary = array();
+		foreach ( $day_rows_ary as $label => $rows ) {
+			switch ( $columns_ary[0] ) {
+				case 'count':
+					if ( $columns_ary[1] === '*' ) {
+						$countall = $countall + $this->wrap_count( $rows );
+					} else {
+						foreach ( $rows as $r ) {
+							$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+							// OLD（page_id 分岐 L1097-1100 相当）は isset 判定（truthy でない）＝忠実再現
+							if ( isset( $faithful[ $columns_ary[1] ] ) ) {
+								++$countall;
+							}
+						}
+					}
+					break;
+
+				case '*':
+					foreach ( $rows as $r ) {
+						$results_ary[] = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+					}
+					break;
+
+				default:
+					foreach ( $rows as $r ) {
+						$faithful = $this->rm_r1_project_viewpv_row( $r, $is_reject_map );
+						$lineary  = array();
+						foreach ( $columns_ary as $column ) {
+							$lineary[ $column ] = isset( $faithful[ $column ] ) ? $faithful[ $column ] : null;
+						}
+						$results_ary[] = $lineary;
+					}
+					break;
+			}
+		}
+
+		if ( $columns_ary[0] === 'count' ) {
+			return $countall;
+		}
+		return $results_ary;
+	}
+
 
 	/**
 	 * protected
 	 */
 	protected function get_results_view_page_version_hist( $query = null, $tracking_id = 'all' ) {
-		global $qahm_time;
+		// #1153: version_hist は 'all' ディレクトリ（全 tracking_id 横断）に格納されるため、
+		// ファイル名日付の解釈は 'all' 暦（＝WP-TZ）で揃える。get_site_clock('all') は WP-TZ を返す。
+		$clock = QAHM_Time::get_site_clock( 'all' );
 
 		//view_pv table is in file
 		$data_dir = $this->get_data_dir_path();
@@ -1175,15 +2017,15 @@ class QAHM_Db extends QAHM_File_Data {
 		$countall    = 0;
 		// where date
 		if ( preg_match( '/where update_date between.*([0-9]{4}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2}).*and.*([0-9]{4}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2}.[0-9]{2})/i', $query, $date_strings ) ) {
-			$s_unixtime = $qahm_time->str_to_unixtime( $date_strings[1] );
-			$e_unixtime = $qahm_time->str_to_unixtime( $date_strings[2] );
+			$s_unixtime = $clock->str_to_unixtime( $date_strings[1] );
+			$e_unixtime = $clock->str_to_unixtime( $date_strings[2] );
 
 			foreach ( $allfiles as $file ) {
 				$filename = $file['name'];
 				if ( is_file( $verhist_dir . $filename ) ) {
 					$f_date = $this->wrap_substr( $filename, 0, 10 ) . ' 00:00:00';
 
-					$f_unixtime = $qahm_time->str_to_unixtime( $f_date );
+					$f_unixtime = $clock->str_to_unixtime( $f_date );
 					if ( $s_unixtime <= $f_unixtime && $f_unixtime <= $e_unixtime ) {
 						$tmpary = $this->wrap_unserialize( $this->wrap_get_contents( $verhist_dir . $filename ) );
 						//データは連想配列に入っている
@@ -1322,7 +2164,8 @@ class QAHM_Db extends QAHM_File_Data {
 	}
 
 	protected function get_results_days_access( $query = null, $tracking_id = 'all' ) {
-		global $qahm_time;
+		// #1153: per-tid summary を読むので時計も同じ tracking_id で（'all' は WP-TZ 短絡）。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		//view_pv table is in file
 		$data_dir                 = $this->get_data_dir_path();
 		$view_dir                 = $data_dir . 'view/';
@@ -1356,14 +2199,14 @@ class QAHM_Db extends QAHM_File_Data {
 		if ( preg_match( '/where date between.*([0-9]{4}.[0-9]{2}.[0-9]{2}).*and.*([0-9]{4}.[0-9]{2}.[0-9]{2})/i', $query, $date_strings ) ) {
 			$s_daystr   = $date_strings[1];
 			$e_daystr   = $date_strings[2];
-			$s_unixtime = $qahm_time->str_to_unixtime( $s_daystr . ' 00:00:00' );
-			$e_unixtime = $qahm_time->str_to_unixtime( $e_daystr . ' 23:59:59' );
+			$s_unixtime = $clock->str_to_unixtime( $s_daystr . ' 00:00:00' );
+			$e_unixtime = $clock->str_to_unixtime( $e_daystr . ' 23:59:59' );
 
 			$is_loop = true;
 			$loopcnt = 0;
 			while ( $is_loop ) {
 				$rowdate      = $days_access_ary[ $loopcnt ]['date'];
-				$row_unixtime = $qahm_time->str_to_unixtime( $rowdate . ' 00:00:00' );
+				$row_unixtime = $clock->str_to_unixtime( $rowdate . ' 00:00:00' );
 
 				if ( $s_unixtime <= $row_unixtime && $row_unixtime <= $e_unixtime ) {
 					//データは連想配列に入っている
@@ -1423,11 +2266,29 @@ class QAHM_Db extends QAHM_File_Data {
 	}
 
 	/**
+	 * #1105: 広告トラフィックの source_domain 補完（表示時のみ。DB は変更しない）
+	 *
+	 * @param array $results_raw_ary 参照渡し
+	 */
+	private function compensate_ad_source_domains( &$results_raw_ary ) {
+		foreach ( $results_raw_ary as $idx => $line_ary ) {
+			if ( isset( $line_ary['source_domain'] ) && isset( $line_ary['utm_source'] ) ) {
+				$results_raw_ary[ $idx ]['source_domain'] = QAHM_Base::resolve_ad_source_domain(
+					$line_ary['source_domain'],
+					$line_ary['utm_source'],
+					isset( $line_ary['utm_medium'] ) ? $line_ary['utm_medium'] : ''
+				);
+			}
+		}
+	}
+
+	/**
 	 * @param null $query
 	 * @return array|bool|int
 	 */
 	protected function get_results_days_access_detail( $query = null, $tracking_id = 'all' ) {
-		global $qahm_time;
+		// #1153: per-tid summary を読むので時計も同じ tracking_id で（'all' は WP-TZ 短絡）。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		//view_pv table is in file
 		$data_dir                        = $this->get_data_dir_path();
 		$view_dir                        = $data_dir . 'view/';
@@ -1462,14 +2323,14 @@ class QAHM_Db extends QAHM_File_Data {
 		if ( preg_match( '/where date between.*([0-9]{4}.[0-9]{2}.[0-9]{2}).*and.*([0-9]{4}.[0-9]{2}.[0-9]{2})/i', $query, $date_strings ) ) {
 			$s_daystr   = $date_strings[1];
 			$e_daystr   = $date_strings[2];
-			$s_unixtime = $qahm_time->str_to_unixtime( $s_daystr . ' 00:00:00' );
-			$e_unixtime = $qahm_time->str_to_unixtime( $e_daystr . ' 23:59:59' );
+			$s_unixtime = $clock->str_to_unixtime( $s_daystr . ' 00:00:00' );
+			$e_unixtime = $clock->str_to_unixtime( $e_daystr . ' 23:59:59' );
 
 			$is_loop = true;
 			$loopcnt = 0;
 			while ( $is_loop ) {
 				$rowdate      = $days_access_detail_ary[ $loopcnt ]['date'];
-				$row_unixtime = $qahm_time->str_to_unixtime( $rowdate . ' 00:00:00' );
+				$row_unixtime = $clock->str_to_unixtime( $rowdate . ' 00:00:00' );
 				$tmp_retary   = array();
 				if ( $s_unixtime <= $row_unixtime && $row_unixtime <= $e_unixtime ) {
 					//データは連想配列に入っている
@@ -1583,6 +2444,8 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ];
 			}
 		}
+		// #1105: 広告トラフィックの source_domain 補完
+		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		//返値をセット
 		if ( $is_error ) {
@@ -1597,7 +2460,8 @@ class QAHM_Db extends QAHM_File_Data {
 	}
 
 	protected function get_results_vr_summary_landingpage( $query = null, $tracking_id = 'all' ) {
-		global $qahm_time;
+		// #1153: per-tid summary を読むので時計も同じ tracking_id で（'all' は WP-TZ 短絡）。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		//view_pv table is in file
 		$data_dir    = $this->get_data_dir_path();
 		$view_dir    = $data_dir . 'view/';
@@ -1628,8 +2492,8 @@ class QAHM_Db extends QAHM_File_Data {
 		if ( preg_match( '/where date between.*([0-9]{4}.[0-9]{2}.[0-9]{2}).*and.*([0-9]{4}.[0-9]{2}.[0-9]{2})/i', $query, $date_strings ) ) {
 			$s_daystr   = $date_strings[1];
 			$e_daystr   = $date_strings[2];
-			$s_unixtime = $qahm_time->str_to_unixtime( $s_daystr . ' 00:00:00' );
-			$e_unixtime = $qahm_time->str_to_unixtime( $e_daystr . ' 23:59:59' );
+			$s_unixtime = $clock->str_to_unixtime( $s_daystr . ' 00:00:00' );
+			$e_unixtime = $clock->str_to_unixtime( $e_daystr . ' 23:59:59' );
 
 			foreach ( $allfiles as $file ) {
 				$filename = $file['name'];
@@ -1638,7 +2502,7 @@ class QAHM_Db extends QAHM_File_Data {
 				} else {
 					$f_date = $this->wrap_substr( $filename, 0, 10 ) . ' 00:00:00';
 
-					$f_unixtime = $qahm_time->str_to_unixtime( $f_date );
+					$f_unixtime = $clock->str_to_unixtime( $f_date );
 					if ( $s_unixtime <= $f_unixtime && $f_unixtime <= $e_unixtime ) {
 						$tmpary = $this->wrap_unserialize( $this->wrap_get_contents( $summary_dir . $filename ) );
 						//データは連想配列に入っている
@@ -1748,7 +2612,7 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_medium'] = $mid_ary[ $mid ];
 			}
 			$cid = (int) $line_ary['utm_campaign'];
-			if ( ! isset( $mid_ary[ $mid ] ) ) {
+			if ( ! isset( $cid_ary[ $cid ] ) ) {
 				$query        = 'select utm_campaign from ' . $this->prefix . 'qa_utm_campaigns where campaign_id=%d';
 				$query        = $this->prepare( $query, $cid );
 				$utm_campaign = $this->get_results( $query );
@@ -1760,6 +2624,8 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ];
 			}
 		}
+		// #1105: 広告トラフィックの source_domain 補完
+		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		//返値をセット
 		if ( $is_error ) {
@@ -1774,7 +2640,8 @@ class QAHM_Db extends QAHM_File_Data {
 	}
 
 	protected function get_results_vr_summary_allpage( $query = null, $tracking_id = 'all' ) {
-		global $qahm_time;
+		// #1153: per-tid summary を読むので時計も同じ tracking_id で（'all' は WP-TZ 短絡）。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		//view_pv table is in file
 		$data_dir    = $this->get_data_dir_path();
 		$view_dir    = $data_dir . 'view/';
@@ -1803,8 +2670,8 @@ class QAHM_Db extends QAHM_File_Data {
 		if ( preg_match( '/where date between.*([0-9]{4}.[0-9]{2}.[0-9]{2}).*and.*([0-9]{4}.[0-9]{2}.[0-9]{2})/i', $query, $date_strings ) ) {
 			$s_daystr   = $date_strings[1];
 			$e_daystr   = $date_strings[2];
-			$s_unixtime = $qahm_time->str_to_unixtime( $s_daystr . ' 00:00:00' );
-			$e_unixtime = $qahm_time->str_to_unixtime( $e_daystr . ' 23:59:59' );
+			$s_unixtime = $clock->str_to_unixtime( $s_daystr . ' 00:00:00' );
+			$e_unixtime = $clock->str_to_unixtime( $e_daystr . ' 23:59:59' );
 
 			foreach ( $allfiles as $file ) {
 				$filename = $file['name'];
@@ -1813,7 +2680,7 @@ class QAHM_Db extends QAHM_File_Data {
 				} else {
 					$f_date = $this->wrap_substr( $filename, 0, 10 ) . ' 00:00:00';
 
-					$f_unixtime = $qahm_time->str_to_unixtime( $f_date );
+					$f_unixtime = $clock->str_to_unixtime( $f_date );
 					if ( $s_unixtime <= $f_unixtime && $f_unixtime <= $e_unixtime ) {
 						$tmpary = $this->wrap_unserialize( $this->wrap_get_contents( $summary_dir . $filename ) );
 						//データは連想配列に入っている
@@ -1921,7 +2788,7 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_medium'] = $mid_ary[ $mid ];
 			}
 			$cid = (int) $line_ary['utm_campaign'];
-			if ( ! isset( $mid_ary[ $mid ] ) ) {
+			if ( ! isset( $cid_ary[ $cid ] ) ) {
 				$query        = 'select utm_campaign from ' . $this->prefix . 'qa_utm_campaigns where campaign_id=%d';
 				$query        = $this->prepare( $query, $cid );
 				$utm_campaign = $this->get_results( $query );
@@ -1933,6 +2800,8 @@ class QAHM_Db extends QAHM_File_Data {
 				$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ];
 			}
 		}
+		// #1105: 広告トラフィックの source_domain 補完
+		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		//返値をセット
 		if ( $is_error ) {
@@ -2002,6 +2871,35 @@ class QAHM_Db extends QAHM_File_Data {
 	}
 
 
+	/**
+	 * #1590: end 側の積分ファイルが無いとき、存在する直近の日まで遡って「中身のある」積分データを返す。
+	 * - 下限＝max( 年初, start_date )＝期間より手前へは戻らない（file-functions.php の同名関数は
+	 *   max( 年初, 計測開始日, start_date )。計測開始日より前のファイルは存在しないので結果は同値）。
+	 *   遡る日数に上限は置かない＝実在するデータを 0 行にしない（全欠損時のコストは別 Issue で glob 化）。
+	 * - 下限日自身も試す（`>=`）。比較の時刻は `!Y-m-d` で 00:00:00 に固定する
+	 *   （`Y-m-d` だけだと生成時刻が入り、秒境界で下限日を取りこぼす）。
+	 * - 空ファイル・壊れたファイルは「無い」扱いで遡りを続ける（空のまま subtract へ進むと start 側の累積が漏れて膨張する）。
+	 * 1つも無ければ null（呼び出し側はその年の差分を「無し」として扱う＝累積を返さない）。
+	 */
+	private function find_latest_integral_summary_data( $vw_summary_dir, $summary_type, $end_datetime, $start_date ) {
+		$year_jan1      = DateTime::createFromFormat( '!Y-m-d', $end_datetime->format( 'Y' ) . '-01-01' );
+		$start_date_obj = DateTime::createFromFormat( '!Y-m-d', $start_date );
+		$min_datetime   = max( $year_jan1, $start_date_obj );
+		$try_datetime   = DateTime::createFromFormat( '!Y-m-d', $end_datetime->format( 'Y-m-d' ) );
+
+		while ( $try_datetime >= $min_datetime ) {
+			$try_file = $vw_summary_dir . $try_datetime->format( 'Y-m-d' ) . '_summary_' . $summary_type . '_i.php';
+			if ( is_readable( $try_file ) ) {
+				$data = $this->wrap_unserialize( $this->wrap_get_contents( $try_file ) );
+				if ( ! empty( $data ) && is_array( $data ) ) {
+					return $data;
+				}
+			}
+			$try_datetime->modify( '-1 day' );
+		}
+		return null;
+	}
+
 	public function calc_summary_dateterm_total( $start_date, $end_date, $summary_type, $tracking_id = 'all' ) {
 
 		$date_format    = 'Y-m-d';
@@ -2059,11 +2957,16 @@ class QAHM_Db extends QAHM_File_Data {
 			$end_file_name = $end_datetime->format( $date_format ) . '_summary_' . $summary_type . '_i.php';
 			$end_file_path = $vw_summary_dir . $end_file_name;
 
-			if ( ! is_readable( $end_file_path ) ) {
-				break;
+			if ( is_readable( $end_file_path ) ) {
+				$end_data = $this->wrap_unserialize( $this->wrap_get_contents( $end_file_path ) );
+			} else {
+				// #1590: end 日のファイルが無い（当日分は夜間 cron 前で未生成が既定）ときは、
+				// 旧来の break（＝その年を丸ごと落とし 0 行になる）をやめ、中身のある直近の日へ丸める。
+				$end_data = $this->find_latest_integral_summary_data( $vw_summary_dir, $summary_type, $end_datetime, $start_date );
+				if ( null === $end_data ) {
+					continue; // 期間内に1つも無い＝この年の差分は無し（累積を返さない）
+				}
 			}
-
-			$end_data = $this->wrap_unserialize( $this->wrap_get_contents( $end_file_path ) );
 
 			// end_dataが空でstart_dataが存在する場合の特別処理
 			if ( empty( $end_data ) && ! empty( $start_data ) ) {
@@ -2158,12 +3061,21 @@ class QAHM_Db extends QAHM_File_Data {
 
 			$year_end_date = ( $year < $end_year ) ? "$year-12-31" : $end_date;
 
-			// 終了日の積分ファイルを直接読み込み（遡り処理削除）
+			// 終了日の積分ファイルを読む。無ければ #1590: 中身のある直近の日へ丸める
+			//（旧来は空配列のまま subtract へ進み、start 側の累積がそのまま返って膨張していた）。
 			$end_date_str          = $year_end_date;
 			$end_date_summary_file = $vw_summary_dir . $end_date_str . '_summary_days_access_detail_i.php';
-			$end_data              = array();
 			if ( is_readable( $end_date_summary_file ) ) {
 				$end_data = $this->wrap_unserialize( $this->wrap_get_contents( $end_date_summary_file ) );
+			} else {
+				$end_datetime = DateTime::createFromFormat( 'Y-m-d', $end_date_str );
+				if ( ! $end_datetime ) {
+					throw new Exception( 'Invalid date format in loop' );
+				}
+				$end_data = $this->find_latest_integral_summary_data( $vw_summary_dir, 'days_access_detail', $end_datetime, $start_date );
+				if ( null === $end_data ) {
+					continue; // 期間内に1つも無い＝この年の差分は無し（累積を返さない）
+				}
 			}
 
 			// 差分を計算
@@ -2600,6 +3512,8 @@ class QAHM_Db extends QAHM_File_Data {
 			$cid                                     = (int) $line_ary['utm_campaign'];
 			$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ] ?? '';
 		}
+		// #1105: 広告トラフィックの source_domain 補完
+		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		// 集計結果を results_raw_ary と同じ形式で返す
 		if ( ! empty( $group_by_keys ) ) {
@@ -2643,8 +3557,9 @@ class QAHM_Db extends QAHM_File_Data {
 
 	//20240816 koji maruyama for speedup
 	function summary_days_growthpages( $dateterm, $tracking_id ) {
-		global $qahm_time;
 		global $qahm_db;
+		// #1153: per-tid 集計なので時計も同じ tracking_id で（'all' は WP-TZ 短絡）。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 		$SUM_TERM        = 7;
 		$results_raw_ary = array();
 		$page_id_keyary  = array();  // ワーク配列：処理済みのpage_idを格納
@@ -2653,8 +3568,8 @@ class QAHM_Db extends QAHM_File_Data {
 		if ( preg_match( '/^date\s*=\s*between\s*([0-9]{4}.[0-9]{2}.[0-9]{2})\s*and\s*([0-9]{4}.[0-9]{2}.[0-9]{2})$/', $dateterm, $datestrs ) ) {
 			$s_daystr   = $datestrs[1];
 			$e_daystr   = $datestrs[2];
-			$s_unixtime = $qahm_time->str_to_unixtime( $s_daystr . ' 00:00:00' );
-			$e_unixtime = $qahm_time->str_to_unixtime( $e_daystr . ' 23:59:59' );
+			$s_unixtime = $clock->str_to_unixtime( $s_daystr . ' 00:00:00' );
+			$e_unixtime = $clock->str_to_unixtime( $e_daystr . ' 23:59:59' );
 
 			// 期間が14日未満かどうかを確認
 			$days_difference = ( $e_unixtime - $s_unixtime ) / ( 60 * 60 * 24 );
@@ -2682,17 +3597,11 @@ class QAHM_Db extends QAHM_File_Data {
 			foreach ( $lp_sum_ary_stt as $lp_data_stt ) {
 				$page_id    = $lp_data_stt['page_id'];
 				$utm_medium = $lp_data_stt['utm_medium'];
-				// #964: メディア補完（集客 → 参照元/メディア表と同じロジック）
-				// #1076: SEARCH_ENGINES 判定を追加（検索エンジン経由を organic として扱う）
+				// #964/#1076/#1508: メディア補完＝共通規則（QAHM_Base::derive_medium_for_empty_utm）に一元化。
+				// own_domain は従来この経路に判定が無かったため null 渡し＝空 source_domain（''→(none) に統一）を除き挙動不変。
 				if ( empty( $utm_medium ) ) {
 					$source_domain = isset( $lp_data_stt['source_domain'] ) ? $lp_data_stt['source_domain'] : 'direct';
-					if ( 'direct' === $source_domain ) {
-						$utm_medium = '(none)';
-					} elseif ( QAHM_Base::is_search_engine_domain( $source_domain ) ) {
-						$utm_medium = 'organic';
-					} else {
-						$utm_medium = 'referral';
-					}
+					$utm_medium    = QAHM_Base::derive_medium_for_empty_utm( $source_domain, null );
 				}
 
 				// 既に同じpage_idとutm_mediumが処理済みの場合は、セッション数を合計
@@ -2716,17 +3625,11 @@ class QAHM_Db extends QAHM_File_Data {
 			foreach ( $lp_sum_ary_end as $lp_data_end ) {
 				$page_id    = $lp_data_end['page_id'];
 				$utm_medium = $lp_data_end['utm_medium'];
-				// #964: メディア補完（集客 → 参照元/メディア表と同じロジック）
-				// #1076: SEARCH_ENGINES 判定を追加（検索エンジン経由を organic として扱う）
+				// #964/#1076/#1508: メディア補完＝共通規則（QAHM_Base::derive_medium_for_empty_utm）に一元化。
+				// own_domain は従来この経路に判定が無かったため null 渡し＝空 source_domain（''→(none) に統一）を除き挙動不変。
 				if ( empty( $utm_medium ) ) {
 					$source_domain = isset( $lp_data_end['source_domain'] ) ? $lp_data_end['source_domain'] : 'direct';
-					if ( 'direct' === $source_domain ) {
-						$utm_medium = '(none)';
-					} elseif ( QAHM_Base::is_search_engine_domain( $source_domain ) ) {
-						$utm_medium = 'organic';
-					} else {
-						$utm_medium = 'referral';
-					}
+					$utm_medium    = QAHM_Base::derive_medium_for_empty_utm( $source_domain, null );
 				}
 
 				// 既に同じpage_idとutm_mediumが存在する場合は、セッション数を合計
@@ -2915,6 +3818,8 @@ class QAHM_Db extends QAHM_File_Data {
 			$cid                                     = (int) $line_ary['utm_campaign'];
 			$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ] ?? '';
 		}
+		// #1105: 広告トラフィックの source_domain 補完
+		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		// 集計結果を results_raw_ary と同じ形式で返す
 		if ( ! empty( $group_by_keys ) ) {
@@ -3078,6 +3983,8 @@ class QAHM_Db extends QAHM_File_Data {
 			$cid                                     = (int) $line_ary['utm_campaign'];
 			$results_raw_ary[ $idx ]['utm_campaign'] = $cid_ary[ $cid ] ?? '';
 		}
+		// #1105: 広告トラフィックの source_domain 補完
+		$this->compensate_ad_source_domains( $results_raw_ary );
 
 		return $results_raw_ary;
 	}
@@ -3190,6 +4097,548 @@ class QAHM_Db extends QAHM_File_Data {
 	//make summary file
 	//
 	// QA ZERO START
+	/**
+	 * ColumnDB（allpv）の列ファイル群を日単位で読み込む（Epic #1256 P2-α #1287）
+	 *
+	 * 完了マーカー（QAHM_ColumnDB_Manifest）の state=done 確認と、manifest 記録行数・
+	 * 列間の行数整合を検査し、1つでも保証が崩れた場合は null を返す
+	 * （呼び出し元は従来の view_pv 経路へフォールバックする）。
+	 * manifest にエントリが無い日（#1281 導入前の過去月）は、列ファイルの存在と
+	 * 列間の行数一致のみで受け入れる（goal 1a と同じ後方互換姿勢）。
+	 *
+	 * @param string $tracking_id  トラッキングID（'all' 可）
+	 * @param string $date_ymd     対象日（YYYYMMDD）
+	 * @param array  $column_names 読み込む allpv 列名の配列
+	 * @return array|null [ 列名 => 値配列（行順） ]。保証不成立時は null
+	 */
+	public function load_allpv_columns( $tracking_id, $date_ymd, $column_names ) {
+		global $wp_filesystem;
+
+		if ( ! class_exists( 'QAHM_ColumnDB_BinaryIO' ) || ! class_exists( 'QAHM_ColumnDB_Schema' ) || ! class_exists( 'QAHM_ColumnDB_Manifest' ) ) {
+			return null;
+		}
+		if ( empty( $column_names ) ) {
+			return null;
+		}
+
+		$data_dir  = $this->get_data_dir_path();
+		$allpv_dir = $data_dir . 'report/' . $this->get_safe_tracking_id( $tracking_id ) . '/columns-db/allpv/';
+		if ( ! $wp_filesystem->exists( $allpv_dir ) ) {
+			return null;
+		}
+
+		$year_month = $this->wrap_substr( $date_ymd, 0, 6 );
+
+		// Issue #1279 完了マーカー: エントリがある日は state=done を要求する。
+		// converting 残置（変換中/中断）の日を summary に焼き込まない。
+		$manifest_entry = QAHM_ColumnDB_Manifest::get_day(
+			QAHM_ColumnDB_Manifest::load( $allpv_dir, $year_month ),
+			$date_ymd
+		);
+		$expected_rows  = null;
+		if ( null !== $manifest_entry ) {
+			if ( ! QAHM_ColumnDB_Manifest::is_done_entry( $manifest_entry ) ) {
+				return null;
+			}
+			if ( isset( $manifest_entry['rows'] ) ) {
+				$expected_rows = (int) $manifest_entry['rows'];
+				if ( $expected_rows <= 0 ) {
+					// 行0の日は列ファイル自体が無い（空マーカー）。view_pv 側の実態と突合できないため従来経路へ
+					return null;
+				}
+			}
+		}
+
+		$schema   = QAHM_ColumnDB_Schema::SCHEMA_ALLPV;
+		$col_base = $allpv_dir . $year_month . '/allpv_' . $date_ymd . '_';
+		$result   = array();
+		$row_cnt  = null;
+		foreach ( $column_names as $col_name ) {
+			if ( ! isset( $schema[ $col_name ] ) ) {
+				return null;
+			}
+			$col_path = $col_base . $col_name . '.php';
+			if ( ! $wp_filesystem->exists( $col_path ) ) {
+				return null;
+			}
+			if ( QAHM_ColumnDB_Schema::is_widened_column( 'allpv', $col_name ) ) {
+				// T113 (#1477): 拡幅12列は旧幅（uint16/uint8）ファイルが実在しうる
+				// ＝実ファイルの幅を pv_id 行数から自己判定して読む（done ゲート通過後のみ到達）
+				$values = QAHM_ColumnDB_BinaryIO::read_column_auto( $col_path, $col_base . 'pv_id.php' );
+			} else {
+				switch ( $schema[ $col_name ]['type'] ) {
+					case QAHM_ColumnDB_Schema::TYPE_UINT64:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint64_array( $col_path );
+						break;
+					case QAHM_ColumnDB_Schema::TYPE_UINT32:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint32_array( $col_path );
+						break;
+					case QAHM_ColumnDB_Schema::TYPE_UINT16:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint16_array( $col_path );
+						break;
+					case QAHM_ColumnDB_Schema::TYPE_UINT8:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint8_array( $col_path );
+						break;
+					default:
+						return null;
+				}
+			}
+			if ( false === $values || ! is_array( $values ) ) {
+				return null;
+			}
+			$cnt = $this->wrap_count( $values );
+			if ( null === $row_cnt ) {
+				$row_cnt = $cnt;
+				if ( null !== $expected_rows && $expected_rows !== $cnt ) {
+					// manifest 記録行数と実列長の不一致 = 部分欠損や書き込み後のドリフト
+					return null;
+				}
+			} elseif ( $cnt !== $row_cnt ) {
+				// 列間の行数不一致 = 変換途中（flush 途中）等の不完全データ
+				return null;
+			}
+			$result[ $col_name ] = $values;
+		}
+
+		if ( 0 === $row_cnt ) {
+			// 全列 0 行（0 バイトファイル等の異常系）。正常な行0日は列ファイル自体が無い
+			return null;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * days_access_detail の1日分集計（sdad）を ColumnDB（allpv）から構築する（Epic #1256 P2-α #1287）
+	 *
+	 * make_summary_days_access_detail のループ内集計（view_pv 行ベース）と同一の意味論。
+	 * user_count は重複除去前の reader_id 配列のまま返し、呼び出し元の既存 unique 処理を共用する
+	 * （serialize 出力の byte 等価を担保するため、キー順・型も既存集計に合わせている）。
+	 *
+	 * @param string $tracking_id   トラッキングID（'all' 可）
+	 * @param string $f_date        対象日（Y-m-d）
+	 * @param int    $expected_rows 期待行数（処理中の view_pv 日次ファイルの行数）
+	 * @return array|null sdad 配列。ColumnDB から構築できない場合は null
+	 */
+	private function make_sdad_from_allpv( $tracking_id, $f_date, $expected_rows ) {
+		$cols = $this->load_allpv_columns(
+			$tracking_id,
+			str_replace( '-', '', $f_date ),
+			array( 'pv_id', 'device_id', 'source_id', 'medium_id', 'campaign_id', 'is_newuser', 'reader_id', 'browse_sec', 'is_last', 'pv' )
+		);
+		if ( null === $cols ) {
+			return null;
+		}
+
+		// view_pv は夜間チェーン内で qa_pv_log と行数突合・再構築される（自己修復）。
+		// done 済み allpv は再変換されないため、view_pv 側と行数が食い違う日（ドリフト日）に
+		// 凍結スナップショットで上書きしないよう、行数一致を allpv 採用の条件にする。
+		if ( $this->wrap_count( $cols['pv'] ) !== (int) $expected_rows ) {
+			return null;
+		}
+
+		// allpv の行順は変換器内部のセッション採番順（reader グループ順）で、view_pv 日次ファイルの
+		// pv_id 昇順（pk 順）と一致しない。sdad はネストキーの挿入順が serialize に出るため、
+		// pv_id 昇順に並べ替えて従来集計と同一の行順を再現する。
+		$pvid_order = array_map( 'intval', $cols['pv_id'] );
+		asort( $pvid_order, SORT_NUMERIC );
+
+		$sdad_ary = array();
+		$is_QA    = 1;
+		foreach ( array_keys( $pvid_order ) as $row ) {
+			$device_id   = (int) $cols['device_id'][ $row ];
+			$source_id   = (int) $cols['source_id'][ $row ];
+			$medium_id   = (int) $cols['medium_id'][ $row ];
+			$campaign_id = (int) $cols['campaign_id'][ $row ];
+			$is_newuser  = (int) $cols['is_newuser'][ $row ];
+			$reader_id   = (int) $cols['reader_id'][ $row ];
+			$browse_sec  = (int) $cols['browse_sec'][ $row ];
+
+			// 当日の1ページ目（LP着地）= セッション。LP かつ最終 PV = 直帰
+			$is_landingpage = ( 1 === (int) $cols['pv'][ $row ] ) ? 1 : 0;
+			$bounce_count   = ( $is_landingpage && (int) $cols['is_last'][ $row ] ) ? 1 : 0;
+
+			if ( isset( $sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ] ) ) {
+				$sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['pv_count']      += 1;
+				$sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['session_count'] += $is_landingpage;
+				$sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['user_count'][]   = $reader_id;
+				$sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['bounce_count']  += $bounce_count;
+				$sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['time_on_page']  += $browse_sec;
+			} else {
+				$sdad_ary[ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ] = array(
+					'pv_count'      => 1,
+					'session_count' => $is_landingpage,
+					'user_count'    => array( $reader_id ),
+					'bounce_count'  => $bounce_count,
+					'time_on_page'  => $browse_sec,
+				);
+			}
+		}
+
+		return $sdad_ary;
+	}
+
+	/**
+	 * summary_allpage（sap）/ summary_landingpage（sl）の1日分集計を ColumnDB（allpv）から構築する（Epic #1256 P2-β1 #1313）
+	 *
+	 * make_summary_days_access_detail のループ内集計（view_pv 行ベース）と同一の意味論。
+	 * user_count は重複除去前の reader_id 配列のまま返し、呼び出し元の既存 unique 処理を共用する
+	 * （serialize 出力の byte 等価を担保するため、キー順・型も既存集計に合わせている）。
+	 *
+	 * sl の second_page・session_time は「物理的に次の行（pv_id 昇順の次行）」を辿る現行挙動を再現する。
+	 * allpv の next_page_id 列はセッション境界を尊重した値で現行と食い違うため使用しない。
+	 *
+	 * @param string $tracking_id   トラッキングID（'all' 可）
+	 * @param string $f_date        対象日（Y-m-d）
+	 * @param int    $expected_rows 期待行数（処理中の view_pv 日次ファイルの行数）
+	 * @return array|null array( 'sap' => sap_ary, 'sl' => sl_ary )。構築できない場合は null
+	 */
+	private function make_sap_sl_from_allpv( $tracking_id, $f_date, $expected_rows ) {
+		$cols = $this->load_allpv_columns(
+			$tracking_id,
+			str_replace( '-', '', $f_date ),
+			array( 'pv_id', 'page_id', 'device_id', 'source_id', 'medium_id', 'campaign_id', 'is_newuser', 'reader_id', 'browse_sec', 'is_last', 'pv' )
+		);
+		if ( null === $cols ) {
+			return null;
+		}
+
+		// sdad と同じドリフトガード: view_pv と行数が食い違う日（ドリフト日）は従来経路へ
+		if ( $this->wrap_count( $cols['pv'] ) !== (int) $expected_rows ) {
+			return null;
+		}
+
+		// allpv の行順は変換器内部のセッション採番順。view_pv 日次ファイルの pv_id 昇順（pk 順）に
+		// 並べ替えて、従来集計と同一の行順・前方走査（物理次行）を再現する。
+		$pvid_order = array_map( 'intval', $cols['pv_id'] );
+		asort( $pvid_order, SORT_NUMERIC );
+		$sorted_rows = array_keys( $pvid_order );
+		$row_max     = $this->wrap_count( $sorted_rows );
+
+		$sap_ary = array();
+		$sl_ary  = array();
+		$is_QA   = 1;
+
+		for ( $pos = 0; $pos < $row_max; $pos++ ) {
+			$row = $sorted_rows[ $pos ];
+
+			$page_id     = (int) $cols['page_id'][ $row ];
+			$device_id   = (int) $cols['device_id'][ $row ];
+			$source_id   = (int) $cols['source_id'][ $row ];
+			$medium_id   = (int) $cols['medium_id'][ $row ];
+			$campaign_id = (int) $cols['campaign_id'][ $row ];
+			$is_newuser  = (int) $cols['is_newuser'][ $row ];
+			$reader_id   = (int) $cols['reader_id'][ $row ];
+			$browse_sec  = (int) $cols['browse_sec'][ $row ];
+			$is_last     = (int) $cols['is_last'][ $row ];
+
+			$is_landingpage = ( 1 === (int) $cols['pv'][ $row ] ) ? 1 : 0;
+			$is_bounce      = ( $is_landingpage && $is_last ) ? 1 : 0;
+
+			// ---- sap（全 PV を page_id 単位で集計） ----
+			$tmp_sap_ary = array(
+				'pv_count'     => 1,
+				'user_count'   => array( $reader_id ),
+				'bounce_count' => $is_bounce,
+				'exit_count'   => $is_last ? 1 : 0,
+				'time_on_page' => $browse_sec,
+				'lp_count'     => $is_landingpage,
+			);
+			if ( isset( $sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ] ) ) {
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['pv_count']     += $tmp_sap_ary['pv_count'];
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['user_count'][]  = $tmp_sap_ary['user_count'][0];
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['bounce_count'] += $tmp_sap_ary['bounce_count'];
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['exit_count']   += $tmp_sap_ary['exit_count'];
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['time_on_page'] += $tmp_sap_ary['time_on_page'];
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ]['lp_count']     += $tmp_sap_ary['lp_count'];
+			} else {
+				$sap_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $is_QA ] = $tmp_sap_ary;
+			}
+
+			// ---- sl（LP 着地のみ。second_page・session_time は物理次行を辿る現行挙動） ----
+			if ( $is_landingpage ) {
+				$second_page = 0;
+				$tmp_sl_ary  = array(
+					'pv_count'      => 1,
+					'session_count' => 1,
+					'user_count'    => array( $reader_id ),
+					'bounce_count'  => $is_bounce,
+					'session_time'  => $browse_sec,
+				);
+				// 直帰でない LP は、物理次行から is_last までを同一セッションとして session_time/pv_count を集計
+				if ( ! $is_last && $pos < $row_max - 1 ) {
+					$second_page = (int) $cols['page_id'][ $sorted_rows[ $pos + 1 ] ];
+					for ( $kkk = $pos + 1; $kkk < $row_max; $kkk++ ) {
+						$krow                        = $sorted_rows[ $kkk ];
+						$tmp_sl_ary['session_time'] += (int) $cols['browse_sec'][ $krow ];
+						++$tmp_sl_ary['pv_count'];
+						if ( (int) $cols['is_last'][ $krow ] ) {
+							break;
+						}
+					}
+				}
+				if ( isset( $sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ] ) ) {
+					$sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ]['pv_count']      += $tmp_sl_ary['pv_count'];
+					$sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ]['session_count'] += $tmp_sl_ary['session_count'];
+					$sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ]['user_count'][]   = $tmp_sl_ary['user_count'][0];
+					$sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ]['bounce_count']  += $tmp_sl_ary['bounce_count'];
+					$sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ]['session_time']  += $tmp_sl_ary['session_time'];
+				} else {
+					$sl_ary[ $page_id ][ $device_id ][ $source_id ][ $medium_id ][ $campaign_id ][ $is_newuser ][ $second_page ][ $is_QA ] = $tmp_sl_ary;
+				}
+			}
+		}
+
+		return array(
+			'sap' => $sap_ary,
+			'sl'  => $sl_ary,
+		);
+	}
+
+	/**
+	 * click_event の1日分の指定カラムを ColumnDB から読み出す（Epic #1256 P2-β2 #1316）
+	 *
+	 * load_allpv_columns と同型。click_event 列DB（report/{tid}/columns-db/click_event/）から
+	 * 指定カラムを読み、完了マーカー（state=done）・manifest 行数と実列長の一致・列間の行数一致を
+	 * すべて満たした場合のみ配列を返す。1つでも崩れたら null（呼び出し側は従来 raw_c 経路へ）。
+	 *
+	 * click_event の行数は「クリックイベント数」で view_pv 行数とは無関係なため、view_pv 行数との
+	 * 突合は行わない（呼び出し側 make_se_from_clickevent も同様）。
+	 *
+	 * @param string $tracking_id  トラッキングID（'all' 可）
+	 * @param string $date_ymd     対象日（YYYYMMDD）
+	 * @param array  $column_names 取得するカラム名の配列
+	 * @return array|null カラム名 => 値配列。読めない/保証が崩れる場合は null
+	 */
+	public function load_clickevent_columns( $tracking_id, $date_ymd, $column_names ) {
+		global $wp_filesystem;
+
+		if ( ! class_exists( 'QAHM_ColumnDB_BinaryIO' ) || ! class_exists( 'QAHM_ColumnDB_Schema' ) || ! class_exists( 'QAHM_ColumnDB_Manifest' ) ) {
+			return null;
+		}
+		if ( empty( $column_names ) ) {
+			return null;
+		}
+
+		$data_dir  = $this->get_data_dir_path();
+		$click_dir = $data_dir . 'report/' . $this->get_safe_tracking_id( $tracking_id ) . '/columns-db/click_event/';
+		if ( ! $wp_filesystem->exists( $click_dir ) ) {
+			return null;
+		}
+
+		$year_month = $this->wrap_substr( $date_ymd, 0, 6 );
+
+		// Issue #1279 完了マーカー: エントリがある日は state=done を要求する。
+		// converting 残置（変換中/中断）の日を summary に焼き込まない。
+		$manifest_entry = QAHM_ColumnDB_Manifest::get_day(
+			QAHM_ColumnDB_Manifest::load( $click_dir, $year_month ),
+			$date_ymd
+		);
+		$expected_rows  = null;
+		if ( null !== $manifest_entry ) {
+			if ( ! QAHM_ColumnDB_Manifest::is_done_entry( $manifest_entry ) ) {
+				return null;
+			}
+			if ( isset( $manifest_entry['rows'] ) ) {
+				$expected_rows = (int) $manifest_entry['rows'];
+				if ( $expected_rows <= 0 ) {
+					// クリック0件の日は列ファイルが無い（空マーカー）。従来 raw_c 経路でも空 se になるため null
+					return null;
+				}
+			}
+		}
+
+		$schema   = QAHM_ColumnDB_Schema::SCHEMA_CLICK_EVENT;
+		$col_base = $click_dir . $year_month . '/click_event_' . $date_ymd . '_';
+		$result   = array();
+		$row_cnt  = null;
+		foreach ( $column_names as $col_name ) {
+			if ( ! isset( $schema[ $col_name ] ) ) {
+				return null;
+			}
+			$col_path = $col_base . $col_name . '.php';
+			if ( ! $wp_filesystem->exists( $col_path ) ) {
+				return null;
+			}
+			if ( QAHM_ColumnDB_Schema::is_widened_column( 'click_event', $col_name ) ) {
+				// T113 (#1477): 拡幅12列は旧幅（uint16）ファイルが実在しうる
+				// ＝実ファイルの幅を pv_id 行数から自己判定して読む（done ゲート通過後のみ到達）
+				$values = QAHM_ColumnDB_BinaryIO::read_column_auto( $col_path, $col_base . 'pv_id.php' );
+			} else {
+				switch ( $schema[ $col_name ]['type'] ) {
+					case QAHM_ColumnDB_Schema::TYPE_UINT64:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint64_array( $col_path );
+						break;
+					case QAHM_ColumnDB_Schema::TYPE_UINT32:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint32_array( $col_path );
+						break;
+					case QAHM_ColumnDB_Schema::TYPE_UINT16:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint16_array( $col_path );
+						break;
+					case QAHM_ColumnDB_Schema::TYPE_UINT8:
+						$values = QAHM_ColumnDB_BinaryIO::read_uint8_array( $col_path );
+						break;
+					default:
+						return null;
+				}
+			}
+			if ( false === $values || ! is_array( $values ) ) {
+				return null;
+			}
+			$cnt = $this->wrap_count( $values );
+			if ( null === $row_cnt ) {
+				$row_cnt = $cnt;
+				if ( null !== $expected_rows && $expected_rows !== $cnt ) {
+					// manifest 記録行数と実列長の不一致 = 部分欠損や書き込み後のドリフト
+					return null;
+				}
+			} elseif ( $cnt !== $row_cnt ) {
+				// 列間の行数不一致 = 変換途中（flush 途中）等の不完全データ
+				return null;
+			}
+			$result[ $col_name ] = $values;
+		}
+
+		if ( 0 === $row_cnt ) {
+			// 全列 0 行（0 バイトファイル等の異常系）。従来 raw_c 経路でも空 se になるため null
+			return null;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * summary_event（se）の1日分を ColumnDB（click_event + allpv）から構築する（Epic #1256 P2-β2 #1316）
+	 *
+	 * 【背景＝T68 故障の修復】現行 se は raw_c の field[0]（T68 以降 'gXX' 形式）を (int) 変換しており、
+	 * 'g210' → 0 のようにセレクタIDが潰れ、dedup の畳み込み・version 先頭セレクタ（base_selector[0]）への
+	 * 化けで「実クリック要素でなく version 先頭セレクタ」を出し続けていた。本メソッドは click_event 列DB
+	 * （selector_id / to_url_id を統合辞書で逆引き）から史実どおりのセレクタ・遷移を復元する。
+	 *
+	 * - selector: selector_id を QAHM_ColumnDB_Selectors（'all' は click_event 配下の統合辞書、個別 tid は
+	 *   view/{tid}/global-selectors-dict）で逆引き。version_hist base_selector の index ではない（Devin B）。
+	 * - cv_type / url: to_url_id を dict-urls で逆引きし、'p','t','i','o' は cv_type、それ以外は url、
+	 *   to_url_id=0 は遷移なし＝cv_type='c'/url=null（現行 raw_c の TRANSITION 分岐と同一意味）。
+	 * - version_id: click_event に無いため allpv（pv_id→version_id）で join。join 失敗は version_id=0 で含める。
+	 * - dedup: 正しい selector + cv_type で区別（現行の sel_num=0 畳み込みを廃止＝修復）。同一 pv が同一
+	 *   イベントを複数回クリックしても pv_id は1回だけ（現行のページ内 dedup と同一）。読者 data-api の
+	 *   gtype_event フィルタは event 順・要素数に非依存のため、順序の正規化は行わない。
+	 *
+	 * フォールバック: click_event・allpv のいずれかが done でない/行数不整合の日は null を返し、呼び出し側は
+	 * 従来 raw_c 経路を使う（誤爆方向は常に旧動作）。allpv は sap/sl と同じく view_pv 行数一致も条件にする
+	 * （ドリフト日は当日の summary を一括して従来経路へ寄せる）。
+	 *
+	 * @param string $tracking_id   トラッキングID（'all' 可）
+	 * @param string $f_date        対象日（Y-m-d）
+	 * @param int    $expected_rows 期待行数（処理中の view_pv 日次ファイルの行数。allpv join 元の鮮度ガード）
+	 * @return array|null se 配列。構築できない場合は null
+	 */
+	private function make_se_from_clickevent( $tracking_id, $f_date, $expected_rows ) {
+		$date_ymd = str_replace( '-', '', $f_date );
+
+		// click_event 列（pv_id / page_id / selector_id / to_url_id）
+		$click = $this->load_clickevent_columns(
+			$tracking_id,
+			$date_ymd,
+			array( 'pv_id', 'page_id', 'selector_id', 'to_url_id' )
+		);
+		if ( null === $click ) {
+			return null;
+		}
+
+		// version_id は click_event に無いため allpv（pv_id→version_id）で join する。
+		// allpv も done + view_pv 行数一致を採用条件にする（ドリフト日は従来経路へ）。
+		$allpv = $this->load_allpv_columns( $tracking_id, $date_ymd, array( 'pv_id', 'version_id' ) );
+		if ( null === $allpv ) {
+			return null;
+		}
+		if ( $this->wrap_count( $allpv['pv_id'] ) !== (int) $expected_rows ) {
+			return null;
+		}
+		$pv_to_version = array();
+		for ( $i = 0, $allpv_max = $this->wrap_count( $allpv['pv_id'] ); $i < $allpv_max; $i++ ) {
+			$pv_to_version[ (int) $allpv['pv_id'][ $i ] ] = (int) $allpv['version_id'][ $i ];
+		}
+
+		// セレクタ辞書・URL 辞書を用意（既存 fetch_click_event_data と同じ解決方法）。
+		if ( ! class_exists( 'QAHM_ColumnDB_Selectors' ) || ! class_exists( 'QAHM_ColumnDB_Dictionary' ) ) {
+			return null;
+		}
+		$data_dir  = $this->get_data_dir_path();
+		$click_dir = $data_dir . 'report/' . $this->get_safe_tracking_id( $tracking_id ) . '/columns-db/click_event/';
+		if ( 'all' === $tracking_id ) {
+			$selectors = new QAHM_ColumnDB_Selectors( 'all', $click_dir );
+		} else {
+			$selectors = new QAHM_ColumnDB_Selectors( $tracking_id );
+		}
+		$urls = new QAHM_ColumnDB_Dictionary( $click_dir . 'dict-urls.php' );
+
+		$se_ary     = array();
+		$ver_to_idx = array(); // version_id => $se_ary の添字
+		$evt_to_idx = array(); // version_id => "selector\0cv_type" => event の添字
+		$pv_seen    = array(); // version_id => イベントキー => pv_id => true（pv 単位の重複排除）
+
+		for ( $row = 0, $row_max = $this->wrap_count( $click['pv_id'] ); $row < $row_max; $row++ ) {
+			$pv_id       = (int) $click['pv_id'][ $row ];
+			$version_id  = isset( $pv_to_version[ $pv_id ] ) ? $pv_to_version[ $pv_id ] : 0;
+			$selector_id = (int) $click['selector_id'][ $row ];
+			$to_url_id   = (int) $click['to_url_id'][ $row ];
+
+			$selector = $selectors->get_string( $selector_id );
+			if ( null === $selector ) {
+				$selector = '';
+			}
+
+			// to_url_id=0 は遷移なし（純クリック）。それ以外は遷移文字列を逆引きし、
+			// 'p','t','i','o' は cv_type、それ以外は url（現行 raw_c の TRANSITION 分岐と同一）。
+			$cv_type = 'c';
+			$url     = null;
+			if ( 0 !== $to_url_id ) {
+				$transition = $urls->get_string( $to_url_id );
+				if ( null !== $transition && '' !== $transition ) {
+					if ( $this->wrap_in_array( $transition, array( 'p', 't', 'i', 'o' ) ) ) {
+						$cv_type = $transition;
+					} else {
+						$url = $transition;
+					}
+				}
+			}
+
+			if ( ! isset( $ver_to_idx[ $version_id ] ) ) {
+				$ver_to_idx[ $version_id ] = $this->wrap_count( $se_ary );
+				$se_ary[]                  = array(
+					'page_id'    => (int) $click['page_id'][ $row ],
+					'version_id' => $version_id,
+					'event'      => array(),
+				);
+			}
+			$se_idx  = $ver_to_idx[ $version_id ];
+			$evt_key = $selector . "\0" . $cv_type;
+
+			if ( ! isset( $evt_to_idx[ $version_id ][ $evt_key ] ) ) {
+				$evt_to_idx[ $version_id ][ $evt_key ] = $this->wrap_count( $se_ary[ $se_idx ]['event'] );
+				$se_ary[ $se_idx ]['event'][]          = array(
+					'cv_type'  => $cv_type,
+					'selector' => $selector,
+					'pv_id'    => array(),
+					'url'      => $url,
+				);
+			}
+			$evt_idx = $evt_to_idx[ $version_id ][ $evt_key ];
+
+			// 同一 pv が同一 (selector, cv_type) を複数回クリックしても pv_id は1回だけ
+			if ( ! isset( $pv_seen[ $version_id ][ $evt_key ][ $pv_id ] ) ) {
+				$se_ary[ $se_idx ]['event'][ $evt_idx ]['pv_id'][] = $pv_id;
+				$pv_seen[ $version_id ][ $evt_key ][ $pv_id ]      = true;
+			}
+		}
+
+		$selectors->close();
+		$urls->close();
+
+		return $se_ary;
+	}
+
 	public function make_summary_days_access_detail( $connect_dir = 'all' ) {
 		if ( $connect_dir == '' ) {
 			$tracking_id = $this->get_tracking_id();
@@ -3602,6 +5051,27 @@ class QAHM_Db extends QAHM_File_Data {
 							}
 						}
 
+						// #1287 P2-α / #1313 P2-β1: days_access_detail（sdad）・summary_allpage（sap）・summary_landingpage（sl）は
+						// ColumnDB（allpv）読みを正とする。完了マーカー・行数一致等の保証が成立しない日は、
+						// 従来どおり上のループ集計値（view_pv 由来）を使う（誤爆方向は常に旧動作 = エラーを発生させず移行）。
+						// summary_event（se）は raw_c クリック明細が必要なため現行維持（P2-β2 で続編）。
+						$sdad_allpv = $this->make_sdad_from_allpv( $tracking_id, $f_date, $total_pv );
+						if ( null !== $sdad_allpv ) {
+							$sdad_ary = $sdad_allpv;
+						}
+						$sapsl_allpv = $this->make_sap_sl_from_allpv( $tracking_id, $f_date, $total_pv );
+						if ( null !== $sapsl_allpv ) {
+							$sap_ary = $sapsl_allpv['sap'];
+							$sl_ary  = $sapsl_allpv['sl'];
+						}
+						// #1316 P2-β2: summary_event（se）は click_event 列DB（selector_id/to_url_id を統合辞書で
+						// 逆引き）から史実どおりに復元する。version_id は allpv（pv_id→version_id）で join。
+						// click_event・allpv の保証が崩れる日は null＝従来 raw_c 由来の $se_ary（上のループ集計）を使う。
+						$se_clickevent = $this->make_se_from_clickevent( $tracking_id, $f_date, $total_pv );
+						if ( null !== $se_clickevent ) {
+							$se_ary = $se_clickevent;
+						}
+
 						//容量を減らすためユーザーカウントを置き換えていく必要がある。
 						foreach ( $sdad_ary as $idxd => $aryd ) {
 							foreach ( $aryd as $idxs => $arys ) {
@@ -3850,6 +5320,13 @@ class QAHM_Db extends QAHM_File_Data {
 									$se_ary[ $se_idx ]['event'][ $event_idx ]['selector'] = $base_sel_ary[ $se_ary[ $se_idx ]['version_id'] ][ $se_ary[ $se_idx ]['event'][ $event_idx ]['selector'] ];
 								}
 							}
+						}
+
+						// #1316 P2-β2: click_event 経路で se を復元（raw_c 不在日でも click_event done なら生成可）。
+						// click_event・allpv の保証が崩れる日は null＝上の raw_c 由来 $se_ary（無ければ空配列）を使う。
+						$se_clickevent = $this->make_se_from_clickevent( $tracking_id, $f_date, $total_pv );
+						if ( null !== $se_clickevent ) {
+							$se_ary = $se_clickevent;
 						}
 
 						// write
@@ -4126,9 +5603,10 @@ class QAHM_Db extends QAHM_File_Data {
 		$view_dir       = $data_dir . 'view/';
 		$myview_dir     = $view_dir . ( $connect_dir ?: $this->get_tracking_id() ) . '/';
 		$vw_summary_dir = $myview_dir . 'summary/';
-		global $qahm_time;
 		global $wp_filesystem;
-		$yesterday  = $qahm_time->xday_str( -1 );
+		// #1153: 削除対象の per-dir summary に合わせ、同じ識別子の時計で「昨日」を算出（'all' は WP-TZ 短絡）。
+		$clock      = QAHM_Time::get_site_clock( $connect_dir ?: $this->get_tracking_id() );
+		$yesterday  = $clock->xday_str( -1 );
 		$start_date = new DateTime( $from_date );
 		$end_date   = new DateTime( $yesterday );
 

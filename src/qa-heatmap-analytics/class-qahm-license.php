@@ -220,7 +220,8 @@ class QAHM_License extends QAHM_File_Base {
 
 		global $qahm_data_api;
 		$sitemanage   = $qahm_data_api->get_sitemanage();
-		$tagged_sites = array_column( $sitemanage, 'domain' );
+		// 計測サイト未登録時は get_sitemanage() が null を返すため安全ラッパー経由で取り出す（#1548）
+		$tagged_sites = $this->wrap_array_column( $sitemanage, 'domain' );
 
 		$parm                = array();
 		$parm['sec']         = 'license'; // Specific to QA
@@ -287,7 +288,7 @@ class QAHM_License extends QAHM_File_Base {
 		if ( $json_array['is_success'] ) {
 			$is_success = true;
 			$this->change_zero_unauthorized();
-			$json_array['msg'][0]['message'] = esc_html__( 'ライセンス認証を解除しました。', 'qa-heatmap-analytics' );
+			$json_array['msg'][0]['message'] = esc_html__( 'The license has been deactivated.', 'qa-heatmap-analytics' );
 			$json_array['msg'][0]['level']   = 'success';
 			$json_array['msg'][0]['no']      = 0;
 

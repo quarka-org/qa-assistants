@@ -179,6 +179,8 @@ class QAHM_File_Base extends QAHM_Base {
 
 		$qtag_content = str_replace( '{tracking_hash}', $tracking_hash, $qtag_content );
 		$qtag_content = str_replace( '{ajax_url}', $ajax_url, $qtag_content );
+		$qtag_ver     = ( defined( 'QAHM_PLUGIN_VERSION' ) && QAHM_PLUGIN_VERSION ) ? QAHM_PLUGIN_VERSION : '0.0.0';
+		$qtag_content = str_replace( '{qtag_ver}', $qtag_ver, $qtag_content );
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- WP_Filesystem may use FTP mode.
 		if ( ! file_put_contents( $qtag_file_path, $qtag_content ) ) {
@@ -481,7 +483,8 @@ class QAHM_File_Base extends QAHM_Base {
 		$ret_count = 0;
 
 		global $qahm_db;
-		global $qahm_time;
+		// #1153: 月初境界は暦日なので計測サイトTZで算出（$val['date'] ラベルと同基準）。
+		$clock = QAHM_Time::get_site_clock( $tracking_id );
 
 		$data_dir       = $this->get_data_dir_path();
 		$view_dir       = $data_dir . 'view/';
@@ -494,18 +497,18 @@ class QAHM_File_Base extends QAHM_Base {
 				return $ret_count; // 0を返す
 			}
 
-			$month = $qahm_time->month();
+			$month = $clock->month();
 			if ( (int) $month < 10 ) {
 				$month = '0' . (string) $month;
 			} else {
 				$month = (string) $month;
 			}
 
-			$this_month_1st      = $qahm_time->year() . '-' . $month . '-01 00:00:00';
-			$this_month_1st_unix = $qahm_time->str_to_unixtime( $this_month_1st );
+			$this_month_1st      = $clock->year() . '-' . $month . '-01 00:00:00';
+			$this_month_1st_unix = $clock->str_to_unixtime( $this_month_1st );
 
 			foreach ( $daysum_ary as $val ) {
-				$nowunixtime = $qahm_time->str_to_unixtime( $val['date'] . ' 00:00:00' );
+				$nowunixtime = $clock->str_to_unixtime( $val['date'] . ' 00:00:00' );
 				if ( $this_month_1st_unix <= $nowunixtime ) {
 					$ret_count += $val['pv_count'];
 				}
@@ -518,8 +521,9 @@ class QAHM_File_Base extends QAHM_Base {
 	public function get_pvterm_start_date( $tracking_id = 'all' ) {
 
 		global $qahm_db;
-		global $qahm_time;
-		$ret_day = $qahm_time->now_str( 'Y-m-d' );
+		// #1153: days_access.php 不在時のフォールバック「今日」を計測サイトTZで。
+		$clock   = QAHM_Time::get_site_clock( $tracking_id );
+		$ret_day = $clock->now_str( 'Y-m-d' );
 
 		$data_dir       = $this->get_data_dir_path();
 		$view_dir       = $data_dir . 'view/';
@@ -538,8 +542,9 @@ class QAHM_File_Base extends QAHM_Base {
 	public function get_pvterm_latest_date( $tracking_id = 'all' ) {
 
 		global $qahm_db;
-		global $qahm_time;
-		$ret_day = $qahm_time->now_str( 'Y-m-d' );
+		// #1153: days_access.php 不在時のフォールバック「今日」を計測サイトTZで。
+		$clock   = QAHM_Time::get_site_clock( $tracking_id );
+		$ret_day = $clock->now_str( 'Y-m-d' );
 
 		$data_dir       = $this->get_data_dir_path();
 		$view_dir       = $data_dir . 'view/';
@@ -577,34 +582,5 @@ class QAHM_File_Base extends QAHM_Base {
 			}
 		}
 		return $ret_days;
-	}
-
-	//days heatmap
-	public function get_hmterm_start_date( $tracking_id = 'all' ) {
-		global $qahm_time;
-
-		$data_dir   = $this->get_data_dir_path();
-		$view_dir   = $data_dir . 'view/';
-		$myview_dir = $view_dir . $tracking_id . '/view_pv';
-		$raw_p_dir  = $myview_dir . '/raw_p/';
-
-		$allfiles = $this->wrap_dirlist( $raw_p_dir );
-		$minunixt = $qahm_time->now_unixtime();
-		if ( $allfiles ) {
-			foreach ( $allfiles as $file ) {
-				$filename = $file['name'];
-				if ( is_file( $raw_p_dir . $filename ) ) {
-					$f_date     = $this->wrap_substr( $filename, 0, 10 );
-					$f_datetime = $f_date . ' 00:00:00';
-				}
-				$f_unixt = $qahm_time->str_to_unixtime( $f_datetime );
-				if ( $f_unixt < $minunixt && $f_unixt !== 0 ) {
-					$minunixt = $f_unixt;
-				}
-			}
-		}
-		$mindate = $qahm_time->unixtime_to_str( $minunixt );
-		$ret_day = $this->wrap_substr( $mindate, 0, 10 );
-		return $ret_day;
 	}
 }

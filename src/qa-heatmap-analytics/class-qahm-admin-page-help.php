@@ -124,21 +124,29 @@ class QAHM_Admin_Page_Help extends QAHM_Admin_Page_Base {
 						<?php if ( QAHM_TYPE === QAHM_TYPE_ZERO ) { ?>
 							<?php if ( 'ja' === $lang_set ) { ?>
 							<div class="qahm-help__section">
-								<h3 class="section-label"><?php esc_html_e( 'ご利用ガイド', 'qa-heatmap-analytics' ); ?></h3>
-								<a href="https://docs.google.com/document/d/1HeL84w2_HUGMh90rRh46ri2wLymKXx416XjmVVEyn3c/edit?usp=sharing" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'ユーザーマニュアル', 'qa-heatmap-analytics' ); ?></a>
+								<h3 class="section-label">ドキュメント</h3>
+								<a href="https://docs.qazero.com/ja/docs/user-manual/introduction" target="_blank" rel="noopener" class="qahm-help__link">ユーザーガイド</a>
 							</div>
 							<div class="qahm-help__section">
-								<h3 class="section-label"><?php esc_html_e( 'ヘルプ', 'qa-heatmap-analytics' ); ?></h3>
-								<a href="https://qazero.com/customer-support/" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'お問い合わせ', 'qa-heatmap-analytics' ); ?></a>
+								<h3 class="section-label">サポート</h3>
+								<?php if ( is_plugin_active( 'qa-support-chat/qa-support-chat.php' ) ) { ?>
+									<div id="qa-support-chat-container"></div>
+								<?php } else { ?>
+									<a href="https://qazero.com/customer-support/" target="_blank" rel="noopener" class="qahm-help__link">お問い合わせ</a>
+								<?php } ?>	
 							</div>
 							<?php } else { ?>
 							<div class="qahm-help__section">
-								<h3 class="section-label"><?php esc_html_e( 'ご利用ガイド', 'qa-heatmap-analytics' ); ?></h3>
-								<a href="" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'ドキュメント', 'qa-heatmap-analytics' ); ?></a>
+								<h3 class="section-label"><?php esc_html_e( 'Documentation', 'qa-heatmap-analytics' ); ?></h3>
+								<a href="https://docs.qazero.com/docs/user-manual/introduction/" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'User Guide', 'qa-heatmap-analytics' ); ?></a>
 							</div>
 							<div class="qahm-help__section">
-								<h3 class="section-label"><?php esc_html_e( 'カスタマーサポート', 'qa-heatmap-analytics' ); ?></h3>
-								<a href="" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'お問い合わせ', 'qa-heatmap-analytics' ); ?></a>
+								<h3 class="section-label"><?php esc_html_e( 'Support', 'qa-heatmap-analytics' ); ?></h3>
+								<?php if ( is_plugin_active( 'qa-support-chat/qa-support-chat.php' ) ) { ?>
+									<div id="qa-support-chat-container"></div>
+								<?php } else { ?>
+									<a href="https://qazero.com/customer-support/" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'Contact Us', 'qa-heatmap-analytics' ); ?></a>
+								<?php } ?>													
 							</div>
 							<?php } ?>
 						<?php } else { ?>
@@ -147,7 +155,7 @@ class QAHM_Admin_Page_Help extends QAHM_Admin_Page_Base {
 								<a href="<?php echo esc_url( QAHM_DOCUMENTATION_URL ); ?>" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'Documentation', 'qa-heatmap-analytics' ); ?></a>
 							</div>
 							<div class="qahm-help__section">
-								<h3 class="section-label"><?php esc_html_e( 'Community Support', 'qa-heatmap-analytics' ); ?></h3>
+								<h3 class="section-label"><?php esc_html_e( 'Community', 'qa-heatmap-analytics' ); ?></h3>
 								<a href="https://wordpress.org/support/plugin/qa-heatmap-analytics/" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'WordPress Support Forum', 'qa-heatmap-analytics' ); ?></a>
 								<p class="qahm-help__link-description">
 								<?php
@@ -158,13 +166,15 @@ We also welcome your feedback or any insights you\'d like to share.',
 								);
 								?>
 								</p>
+								<a href="<?php $x_link = $this->get_x_link(); echo esc_url( $x_link ); ?>" target="_blank" rel="noopener" class="qahm-help__link"><?php esc_html_e( 'QA Assistants on X', 'qa-heatmap-analytics' ); ?></a>
+
 							</div>
 						<?php } ?>
 
 						<?php // --- プラグインと環境情報 --- ?>
 						<div class="qahm-help__section">
-							<h3 class="section-label"><?php esc_html_e( 'System Information', 'qa-heatmap-analytics' ); ?></h3>
-							<p class="qahm-help__version"><?php echo esc_html( QAHM_PLUGIN_NAME ); ?> <?php esc_html_e( 'Version', 'qa-heatmap-analytics' ); ?>: <?php echo esc_html( QAHM_PLUGIN_VERSION ); ?></p>
+							<h3 class="section-label"><?php esc_html_e( 'Plugin and environment information', 'qa-heatmap-analytics' ); ?></h3>
+							<p class="qahm-help__version"><?php echo esc_html( QAHM_PLUGIN_NAME ); ?> <?php esc_html_e( 'version', 'qa-heatmap-analytics' ); ?>: <?php echo esc_html( QAHM_PLUGIN_VERSION ); ?></p>
 							<table class="qahm-help__info-table">
 								<tr>
 									<th><?php esc_html_e( 'WordPress version', 'qa-heatmap-analytics' ); ?></th>
@@ -180,16 +190,16 @@ We also welcome your feedback or any insights you\'d like to share.',
 								</tr>
 								<?php if ( QAHM_TYPE === QAHM_TYPE_WP ) { ?>
 								<tr>
-									<th><?php esc_html_e( 'Pageviews This Month / Limit:', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Pageviews this month / Monthly limit', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( number_format( $this_month_pv ) . ' / ' . number_format( $pv_limit ) ); ?></td>
 								</tr>
 								<?php } ?>
 								<tr>
-									<th><?php esc_html_e( 'Data Retention Period', 'qa-heatmap-analytics' ); ?></th>
-									<td><?php echo esc_html( $data_retention_days ) . ' ' . esc_html__( '日', 'qa-heatmap-analytics' ); ?></td>
+									<th><?php esc_html_e( 'Data retention period', 'qa-heatmap-analytics' ); ?></th>
+									<td><?php echo esc_html( $data_retention_days ) . ' ' . esc_html__( 'days', 'qa-heatmap-analytics' ); ?></td>
 								</tr>
 								<tr>
-									<th><?php esc_html_e( 'Stored Data Size', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Stored data size', 'qa-heatmap-analytics' ); ?></th>
 									<td>
 									<?php
 									if ( '--' !== $storage_size_mb ) {
@@ -201,11 +211,11 @@ We also welcome your feedback or any insights you\'d like to share.',
 									</td>
 								</tr>
 								<tr>
-									<th><?php esc_html_e( 'Number of Files', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'Number of files', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( $file_count ); ?></td>
 								</tr>
 								<tr>
-									<th><?php esc_html_e( 'QA Page Load Time', 'qa-heatmap-analytics' ); ?></th>
+									<th><?php esc_html_e( 'QA page load time', 'qa-heatmap-analytics' ); ?></th>
 									<td><?php echo esc_html( $avg_page_speed ); ?>
 									<?php
 									if ( '--' !== $avg_page_speed ) {
@@ -283,10 +293,6 @@ We also welcome your feedback or any insights you\'d like to share.',
 
 					</div>
 				</div>
-
-				<?php if ( QAHM_TYPE === QAHM_TYPE_WP ) { ?>
-					<?php $this->create_footer_follow(); ?>
-				<?php } ?>
 
 			</div>
 		</div>

@@ -22,25 +22,162 @@ class QAHM_Time {
 	public $utc_offset;
 	public $timezone_obj;
 
-	public function __construct() {
-		// Asia/Tokyo
-		$this->timezone_string = get_option( 'timezone_string' );
-		// 9
+	/**
+	 * このインスタンスの TZ が「計測サイトに明示設定された確定値」かどうか。
+	 * get_site_clock() がサイトTZを解決できたとき true、WP-TZ 代替時は false。
+	 * （未確認可視化・候補4b 検知の将来フック用。グローバル singleton では false 固定）
+	 */
+	public $tz_confirmed = false;
+
+	/**
+	 * get_site_clock() の per-tracking_id インスタンスキャッシュ（リクエスト内メモ化）
+	 */
+	private static $clock_cache = array();
+
+	/**
+	 * @param string|null $timezone IANA タイムゾーン識別子。null/空ならインストールの WP タイムゾーン。
+	 *                              計測サイトTZは get_site_clock() 経由で渡る。
+	 */
+	public function __construct( $timezone = null ) {
+		// 公開プロパティ utc_offset は従来どおりインストールの WP オフセットを保持（後方互換のため維持）
 		$this->utc_offset = get_option( 'gmt_offset' );
 
-		if ( ! empty( $this->timezone_string ) ) {
-			$this->timezone_obj = new DateTimeZone( $this->timezone_string );
+		if ( ! empty( $timezone ) ) {
+			// サイトTZ経路（IANA 文字列）
+			$this->timezone_obj    = new DateTimeZone( $timezone );
+			$this->timezone_string = $timezone;
 		} else {
-			if ( ! empty( $this->utc_offset ) ) {
-				if ( $this->utc_offset >= 0 ) {
-					$this->timezone_obj = new DateTimeZone( '+' . $this->utc_offset . '00' );
-				} else {
-					$this->timezone_obj = new DateTimeZone( $this->utc_offset . '00' );
+			// WP-TZ経路（引数なし＝従来どおりのグローバル singleton）。
+			// wp_timezone() に委譲し、旧実装の自前オフセット組み立て（gmt_offset が小数の
+			// インド +5:30 / ネパール +5:45 等で不正な DateTimeZone を生む潜在クラッシュ）を根絶する。
+			$this->timezone_obj    = wp_timezone();
+			$this->timezone_string = wp_timezone_string();
+		}
+	}
+
+	/**
+	 * 計測サイト（tracking_id）の TZ に束ねた時計インスタンスを返すファクトリ。
+	 * 暦日・表示系メソッドはこのインスタンス経由で呼ぶことで自動的にサイトTZ動作になる。
+	 * 瞬間/UTC 系（now_unixtime 等）はサイト非依存なのでグローバル $qahm_time のままでよい。
+	 *
+	 * @param string $tracking_id 計測サイト識別子
+	 * @return QAHM_Time サイトTZ（未解決時は WP-TZ 代替）に束ねたインスタンス
+	 */
+	public static function get_site_clock( $tracking_id ) {
+		// 'all'（全サイト横断集計）は、東京の月曜と NY の月曜が別瞬間になるため
+		// 原理的に単一の暦日を持てない。WP-TZ を「ダッシュボードの暦」として意図的に
+		// 採用し、グローバル singleton をそのまま返す。未解決サイトと同じ沈黙フォール
+		// バック経路に乗せず、ここで明示的に短絡することで「設計判断としての WP-TZ」と
+		// 「サイトTZ未解決の代替」を取り違えない（4b 検知の誤爆も防ぐ）。#1153
+		if ( 'all' === $tracking_id ) {
+			global $qahm_time;
+			if ( $qahm_time instanceof self ) {
+				return $qahm_time;
+			}
+			// 通常は file ロード時に初期化済み。未初期化の保険として以降の WP-TZ 解決へ落とす。
+		}
+
+		if ( isset( self::$clock_cache[ $tracking_id ] ) ) {
+			return self::$clock_cache[ $tracking_id ];
+		}
+
+		list( $tz, $confirmed ) = self::resolve_site_tz( $tracking_id );
+		try {
+			$clock = new self( $tz );
+		} catch ( Exception $e ) {
+			// 不正な TZ 文字列でも止めない（1サイトのミスで cron 全滅を防ぐ）。WP-TZ 退避＋未確認扱い。
+			global $qahm_log;
+			if ( isset( $qahm_log ) ) {
+				$qahm_log->warning( 'QAHM_Time::get_site_clock invalid timezone "' . $tz . '" for tracking_id ' . $tracking_id . ', fell back to WP timezone.' );
+			}
+			$clock     = new self( null );
+			$confirmed = false;
+		}
+		$clock->tz_confirmed = $confirmed;
+
+		self::$clock_cache[ $tracking_id ] = $clock;
+		return $clock;
+	}
+
+	/**
+	 * tracking_id から計測サイトの TZ を解決する。
+	 * 沈黙フォールバックを避けるため「明示確定か WP-TZ 代替か」を確定フラグで区別して返す。
+	 *
+	 * @param string $tracking_id
+	 * @return array [ string|null $timezone, bool $confirmed ]
+	 *               明示設定あり → [ IANA文字列, true ] ／ 未設定・サイト不在 → [ null, false ]
+	 */
+	private static function resolve_site_tz( $tracking_id ) {
+		global $qahm_data_api;
+		if ( isset( $qahm_data_api ) && is_object( $qahm_data_api ) && method_exists( $qahm_data_api, 'get_sitemanage' ) ) {
+			foreach ( (array) $qahm_data_api->get_sitemanage() as $site ) {
+				// tracking_id の比較は本コードベースの慣習にあわせ loose（==）。型差での取りこぼしが
+				// 黙って WP-TZ 代替になるのを避ける。
+				if ( isset( $site['tracking_id'] ) && $site['tracking_id'] == $tracking_id ) {
+					if ( ! empty( $site['timezone'] ) ) {
+						return array( $site['timezone'], true ); // 明示確定
+					}
+					break; // サイトは在るが timezone 未設定 → 代替へ
 				}
-			} else {
-				$this->timezone_obj = new DateTimeZone( date_default_timezone_get() );
 			}
 		}
+		return array( null, false ); // 未設定 or サイト不在 → WP-TZ 代替（確定フラグ false）
+	}
+
+	/**
+	 * sitemanage の timezone フィールドに「保存してよい値」を解決する（登録・バックフィル共通の単一窓口）。
+	 *
+	 * データ契約: timezone は常に「有効な IANA 文字列」か「キー未設定」のどちらか。
+	 * '' やオフセット文字列（+09:00 等）は決して保存しない。
+	 * 本メソッドは保存可能な IANA 文字列を返すか、保存すべき値が無いとき '' を返す。
+	 * 呼び出し側は '' を受け取ったら timezone キー自体を書かない（未設定のまま＝実行時 WP-TZ フォールバック）。
+	 *
+	 * 解決順:
+	 *   1. 明示候補 $candidate が IANA 一覧に含まれれば、それを採用（ZERO タグ発行 UI 等で別市場サイトの TZ を選択する経路）。
+	 *   2. それ以外は get_option('timezone_string') を見る。WP で「都市」設定なら IANA が入っているので採用。
+	 *      WP が「手動オフセット」設定（都市未選択）なら空 → '' を返す（＝未設定にする）。
+	 *
+	 * timezone_string は WP コアの仕様上、非空なら必ず IANA だが、念のため一覧で検証してから返す（堅牢化）。
+	 * 共有(core)・型非依存: timezone_identifiers_list() / get_option() は WP・PHP 標準で QAHM_TYPE に依存しない。
+	 *
+	 * @param string|null $candidate 明示指定の TZ 候補（UI 選択値など）。null/空なら WP-TZ から解決。
+	 * @return string 保存してよい IANA 文字列、または保存すべき値が無いとき ''（呼び出し側はキーを書かない）。
+	 */
+	public static function resolve_store_timezone( $candidate = null ) {
+		$iana_list = timezone_identifiers_list();
+
+		// 1. 明示候補（IANA のみ採用。手動オフセット文字列等は弾く）
+		if ( ! empty( $candidate ) && in_array( $candidate, $iana_list, true ) ) {
+			return $candidate;
+		}
+
+		// 2. WP インストールの timezone_string（都市設定なら IANA、手動オフセットなら空）
+		$tz_string = get_option( 'timezone_string' );
+		if ( ! empty( $tz_string ) && in_array( $tz_string, $iana_list, true ) ) {
+			return $tz_string;
+		}
+
+		// 保存すべき確定 IANA 値が無い → キーを書かない（実行時に WP-TZ フォールバック）
+		return '';
+	}
+
+	/**
+	 * このインスタンスの TZ 文字列を返す。JS ペイロード同梱・表示整形用。
+	 * 返却値は通常 IANA 識別子（例: Asia/Tokyo）。ただし WP-TZ 代替経路で WP インストールが
+	 * timezone_string 未設定（gmt_offset のみ）の場合、wp_timezone_string() は UTC オフセット文字列
+	 * （例: +09:00）を返すため、本メソッドもそれを返しうる（IANA ではない）。
+	 * → IANA 前提の消費側（JS dayjs.tz / Intl.DateTimeFormat 等）はこのケースに注意（Phase 3 申し送り）。
+	 * @return string IANA 識別子（例: Asia/Tokyo）または UTC オフセット（例: +09:00）
+	 */
+	public function get_site_timezone() {
+		return $this->timezone_string;
+	}
+
+	/**
+	 * このインスタンスの TZ が計測サイトの明示確定値か（true）、WP-TZ 代替か（false）。
+	 */
+	public function is_timezone_confirmed() {
+		return $this->tz_confirmed;
 	}
 
 	/**
@@ -235,10 +372,98 @@ class QAHM_Time {
 
 	/**
 	 * 日付時刻からunixtime
+	 *
+	 * createFromFormat は時刻フィールドが未指定だと「実行時の現在時刻」で補完する（PHP仕様）。
+	 * これだと date-only 文字列を渡したとき同一入力でも実行時刻で結果が揺れ、期間境界の比較で
+	 * 最終日を取りこぼす等の非決定的バグになりうる（#1153）。本クラスの他メソッドは new DateTime
+	 * 経由で「未指定＝深夜(00:00:00)」に揃っているため、ここも '!' を前置してエポック起点に固定し
+	 * 挙動を統一する。全フィールドを明示した入力には影響しない no-op（現行の全呼び出し元が該当）。
 	 */
 	public function str_to_unixtime( $datetime_str, $format = self::DEFAULT_DATETIME_FORMAT ) {
+		// 空・非文字列フォーマットは不正入力として弾く。'!' を付与すると createFromFormat が
+		// epoch（unixtime 0）を返しうるため、本メソッドの「不正入力は false」契約に倒す。
+		if ( ! is_string( $format ) || '' === $format ) {
+			return false;
+		}
+		// 先頭が '!' でなければ前置（深夜起点に固定）。既に '!' 付きなら二重付与しない。
+		if ( '!' !== $format[0] ) {
+			$format = '!' . $format;
+		}
 		$d = DateTime::createFromFormat( $format, $datetime_str, $this->timezone_obj );
+		// 不正フォーマットでは createFromFormat が false を返す。getTimestamp() で fatal を
+		// 起こさないよう false を返し、呼び出し側で判定できるようにする。
+		if ( false === $d ) {
+			return false;
+		}
 		return $d->getTimestamp();
+	}
+
+	/**
+	 * 計測サイトTZの1暦日 $ymd に対応する UTC 半開区間 [start, end) を返す。
+	 * @param string $ymd 'Y-m-d'
+	 * @return array|false [ int $start_utc, int $end_utc ]（UTC unixtime 秒・半開 start<=t<end）。不正入力は false。
+	 */
+	public function site_day_range_utc( $ymd ) {
+		return $this->site_period_range_utc( $ymd, 'P1D' );
+	}
+
+	/**
+	 * 計測サイトTZの $anchor_ymd 00:00 を起点に $interval_spec 進めた UTC 半開区間 [start, end) を返す。
+	 * P1D=暦日・P7D=1週間・P1M=1ヶ月（いずれもカレンダー算術で DST 安全。PT24H 等の固定秒は使わない）。
+	 * @param string $anchor_ymd 'Y-m-d'
+	 * @param string $interval_spec DateInterval 仕様文字列
+	 * @return array|false [ int $start_utc, int $end_utc ]（UTC unixtime 秒・半開 start<=t<end）。不正入力は false。
+	 */
+	public function site_period_range_utc( $anchor_ymd, $interval_spec = 'P1D' ) {
+		global $qahm_log;
+		// $anchor_ymd / $interval_spec が不正だと DateTimeImmutable / DateInterval が例外を投げる。
+		// 本クラスの方針（fatal にせず log＋センチネル返し）に揃え、false を返して呼び出し側で判定可能にする。
+		try {
+			$start = new DateTimeImmutable( $anchor_ymd . ' 00:00:00', $this->timezone_obj );
+			$end   = $start->add( new DateInterval( $interval_spec ) );
+		} catch ( Exception $e ) {
+			if ( isset( $qahm_log ) ) {
+				$qahm_log->warning( 'QAHM_Time::site_period_range_utc invalid input: anchor=' . $anchor_ymd . ' interval=' . $interval_spec );
+			}
+			return false;
+		}
+		return array( $start->getTimestamp(), $end->getTimestamp() );
+	}
+
+	/**
+	 * 計測サイトTZで $from_ymd〜$to_ymd（両端含む）の連続・ゼロ埋め日系列を返す。
+	 * 各要素は [ 'ymd' => 'Y-m-d', 'start_utc' => int, 'end_utc' => int ]（半開・UTC秒）。
+	 * 二役: (a) バケット済みデータの正準描画順 ／ (b) JS が非バケットデータを振り分けるカット表。
+	 * 不正入力は fatal にせず空配列＋ログ。日送りもカレンダー算術（DST 安全・±86400 禁止）。
+	 * @param string $from_ymd 'Y-m-d'
+	 * @param string $to_ymd   'Y-m-d'
+	 * @return array
+	 */
+	public function site_day_series( $from_ymd, $to_ymd ) {
+		global $qahm_log;
+		// 暦日のみ（'Y-m-d'）を受け付ける。is_date() は時刻付きも許可してしまい、
+		// その場合 ' 00:00:00' 連結で DateTimeImmutable が例外を投げるため is_ymd() で厳密判定する。
+		if ( ! $this->is_ymd( $from_ymd ) || ! $this->is_ymd( $to_ymd ) ) {
+			if ( isset( $qahm_log ) ) {
+				$qahm_log->warning( 'QAHM_Time::site_day_series invalid date range: ' . $from_ymd . ' .. ' . $to_ymd );
+			}
+			return array();
+		}
+
+		$cur  = new DateTimeImmutable( $from_ymd . ' 00:00:00', $this->timezone_obj );
+		$stop = new DateTimeImmutable( $to_ymd . ' 00:00:00', $this->timezone_obj );
+		$one  = new DateInterval( 'P1D' );
+		$out  = array();
+		while ( $cur <= $stop ) {
+			$next  = $cur->add( $one );
+			$out[] = array(
+				'ymd'       => $cur->format( 'Y-m-d' ),
+				'start_utc' => $cur->getTimestamp(),
+				'end_utc'   => $next->getTimestamp(),
+			);
+			$cur = $next;
+		}
+		return $out;
 	}
 
 	/**
@@ -274,15 +499,17 @@ class QAHM_Time {
 		}
 
 		// 特殊な文字列は許可
+		// 注: 本クラスは QAHM_Core_Base を継承していないため wrap_in_array() / wrap_strpos() は使えない。
+		//     これらは native の薄いラッパーなので native 関数を直接使う（挙動等価・既存の潜在バグも解消）。
 		$special_strings = array( 'now', 'today', 'yesterday', 'tomorrow' );
-		if ( $this->wrap_in_array( $date_str, $special_strings ) ) {
+		if ( in_array( $date_str, $special_strings, true ) ) {
 			return true;
 		}
 
 		// 無効なプレースホルダーパターンをチェック
 		$invalid_patterns = array( 'dd', 'mm', 'yyyy', 'hh', 'ii', 'ss' );
 		foreach ( $invalid_patterns as $pattern ) {
-			if ( $this->wrap_strpos( $date_str, $pattern ) !== false ) {
+			if ( strpos( (string) $date_str, $pattern ) !== false ) {
 				return false;
 			}
 		}
@@ -301,6 +528,17 @@ class QAHM_Time {
 		}
 
 		return false;
+	}
+
+	/**
+	 * 厳密に 'Y-m-d'（暦日のみ・時刻なし）かを判定する。
+	 * is_date() は 'Y-m-d H:i:s' 等も許可するため、暦日入力前提のメソッド（site_day_series 等）では
+	 * 本メソッドで時刻付き文字列を弾く。時刻付きを許すと ' 00:00:00' 連結でパース文字列が壊れ例外になる。
+	 * @param string $date_str
+	 * @return bool
+	 */
+	public function is_ymd( $date_str ) {
+		return is_string( $date_str ) && (bool) preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date_str );
 	}
 }
 

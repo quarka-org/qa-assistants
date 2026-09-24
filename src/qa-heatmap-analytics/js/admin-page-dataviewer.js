@@ -369,101 +369,66 @@ qahm.initDateSetting = function() {
 };
 
 
-// カレンダーを設置
-// Date Range Picker を使う（ moment.js を内包している。扱う値も momentインスタンスなので、文字列で渡して変換かける　※ブラウザ依存を避けるため）
+// カレンダーを設置（日付範囲アダプタ qahm.DateRange を使う。案A=ポップオーバー）
+// 旧 daterangepicker（jQuery + moment）から Cally ベースのアダプタへ移行（#1317 Phase 1）。
+// イベント契約 qahm:dateRangeChanged は温存し、下流6画面が直読みするモジュールスコープ変数を
+// onChange でイベント発火より先に更新する。
 qahm.setDateRangePicker = function() {
+	// マウント先は入力行（__text-area）= ポップオーバーが入力の真下に開くように位置基準をここに置く
+	let mountEl = document.querySelector('.qa-zero-date-range__text-area') || document.querySelector('.qa-zero-date-range');
+	let trigger = document.getElementById('datepicker-base-textbox');
+	if ( !mountEl || !trigger || !qahm.DateRange ) {
+		return;
+	}
+	// ポップオーバーの位置基準を入力行に与える
+	if ( !mountEl.style.position ) {
+		mountEl.style.position = 'relative';
+	}
+	// 再初期化に備えて既存インスタンスを破棄
+	if ( qahm._dateRangeHandle && qahm._dateRangeHandle.destroy ) {
+		qahm._dateRangeHandle.destroy();
+	}
 
-	// momentのロケール（言語）を設定
-	moment.locale(qahm.locale_for_js);
-
-	// 日付範囲テキストボックスを更新する共通関数
-    function updateDateRangeTextbox(calStartDateObj, calEndDateObj) {
-        let datePickerText = qahm.formatDateRangeText(calStartDateObj, calEndDateObj);
-        jQuery('#datepicker-base-textbox').val(datePickerText);
-    }
-
-	// momentインスタンス化
-	let rangeStartDate  = moment( reportRangeStartStr, 'YYYY-MM-DD' );
-    let rangeEndDate    = moment( reportRangeEndStr, 'YYYY-MM-DD' );
-
-	// range用のmomentインスタンス
-	let kyouDate = qahm.dateUtils.getToday( 'YYYY-MM-DD' );
-	let zenjitsuDate = qahm.dateUtils.getSmartYesterday( 'YYYY-MM-DD' );
-	let kyouMoment = moment(kyouDate, 'YYYY-MM-DD');
-	let zenjitsuMoment = moment(zenjitsuDate, 'YYYY-MM-DD');
-
-    let daterangeOpt = {
-        startDate: rangeStartDate,
-        endDate: rangeEndDate,
-		minDate: moment( calMinDateStr, 'YYYY-MM-DD' ), //(Date or string) The earliest date a user may select.
-		maxDate: moment( calMaxDateStr, 'YYYY-MM-DD' ), //(Date or string) The latest date a user may select.
-        showCustomRangeLabel: true, //選択肢にカレンダーありか、なしか。
-        showDropdowns: true, //年月選択肢をドロップダウンにするか
-        linkedCalendars: false, //２つのカレンダーを連動させるか（常に連続する2か月の表示か）
-        ranges: {
-			[qahml10n['calender_kako7days']]: [
-				zenjitsuMoment.clone().subtract(6, 'days'),
-				zenjitsuMoment
-			],
-			[qahml10n['calender_kako30days']]: [
-				zenjitsuMoment.clone().subtract(29, 'days'),
-				zenjitsuMoment
-			],
-			[qahml10n['calender_kongetsu']]: [
-				kyouMoment.clone().startOf('month'),
-				kyouMoment.clone().endOf('month')
-			],
-			[qahml10n['calender_sengetsu']]: [
-				kyouMoment.clone().subtract(1, 'month').startOf('month'),
-				kyouMoment.clone().subtract(1, 'month').endOf('month')
-			]
-        },
-        locale: {
-            separator: qahml10n['calender_kara'],
-            customRangeLabel: qahml10n['calender_erabu'],
-            cancelLabel: qahml10n['calender_cancel'],
-            applyLabel: qahml10n['calender_ok'],
-        },
-    };
-
-	// datepickerを初期化（初期化時の表示も updateDateRangeTextbox が呼ばれる）
-    jQuery('#datepicker-base-textbox').daterangepicker(daterangeOpt, updateDateRangeTextbox);
-
-
-    //期間変更された時
-    jQuery('#datepicker-base-textbox').on('apply.daterangepicker', function(ev, picker) {
-		moment.locale(qahm.locale_for_js); // momentのロケール（言語）を設定
-
-		// 選択された日付をdayjsインスタンスに変換
-		let pickedStartInst = dayjs(picker.startDate).tz(qahm.wp_timezone).startOf('day');
-		let pickedEndInst = dayjs(picker.endDate).tz(qahm.wp_timezone).endOf('day');
-
-		// cookieに保存
-		let pickedStartStr = pickedStartInst.toISOString();
-		let pickedEndStr = pickedEndInst.toISOString();
-		qahm.setSafeCookie('qahm_zero_calendar_base_start_date', pickedStartStr, qahm.calendarCookieMaxAge);
-		qahm.setSafeCookie('qahm_zero_calendar_base_end_date', pickedEndStr, qahm.calendarCookieMaxAge);
-
-		// 共通日付変数の更新
-		reportRangeStart = pickedStartInst.toDate();
-		reportRangeEnd = pickedEndInst.toDate();
-		reportRangeStartStr = pickedStartInst.format('YYYY-MM-DD');
-		reportRangeEndStr = pickedEndInst.format('YYYY-MM-DD');
-		reportDateBetween = 'date = between ' + reportRangeStartStr + ' and ' + reportRangeEndStr;
-		dateRangeYmdAry = qahm.makeFormattedDatesArray(reportRangeStart, reportRangeEnd, 'YYYY-MM-DD');
-		
-		// カレンダー変更のイベントを発火
-		jQuery(document).trigger('qahm:dateRangeChanged', [reportRangeStart, reportRangeEnd]);
-
-		// UI表示を更新
-        updateDateRangeTextbox(picker.startDate, picker.endDate);
-
-    });
-
-
-	// 初期表示（初期化時に1回呼ぶ）
-    updateDateRangeTextbox(rangeStartDate, rangeEndDate);
-    
+	qahm._dateRangeHandle = qahm.DateRange.init( mountEl, {
+		trigger: trigger,
+		start: reportRangeStartStr,
+		end: reportRangeEndStr,
+		min: calMinDateStr,
+		max: calMaxDateStr,
+		locale: qahm.locale_for_js,
+		presetLabels: {
+			kako7days: qahml10n['calender_kako7days'],
+			kako30days: qahml10n['calender_kako30days'],
+			kongetsu: qahml10n['calender_kongetsu'],
+			sengetsu: qahml10n['calender_sengetsu'],
+		},
+		// トリガー表示は既存フォーマッタを流用（表示の見た目を維持）。
+		// Date 生成は wp_timezone で行う（new Date('YYYY-MM-DD...') はブラウザローカル解釈で日ズレし得るため）
+		formatLabel: function( s, e ) {
+			return qahm.formatDateRangeText(
+				dayjs.tz( s, qahm.wp_timezone ).toDate(),
+				dayjs.tz( e, qahm.wp_timezone ).toDate()
+			);
+		},
+		// 初期範囲は initDateSetting が cookie 反映済みのため read:false。書き込みのみ（Phase 1 末まで ISO 維持）。
+		cookie: {
+			startName: 'qahm_zero_calendar_base_start_date',
+			endName: 'qahm_zero_calendar_base_end_date',
+			maxAge: qahm.calendarCookieMaxAge,
+			writeFormat: 'iso',
+			read: false,
+		},
+		jqEvent: true,
+		// 下流6画面が直読みする共通日付変数を、イベント発火より先に更新（契約温存）
+		onChange: function( payload ) {
+			reportRangeStart    = payload.startDate;
+			reportRangeEnd      = payload.endDate;
+			reportRangeStartStr = payload.startStr;
+			reportRangeEndStr   = payload.endStr;
+			reportDateBetween   = payload.dateBetween;
+			dateRangeYmdAry     = payload.ymdArray;
+		},
+	} );
 }
 
 
@@ -551,21 +516,6 @@ qahm.makeTable  = function(table, ary) {
         table.updateTable();
     }
 };
-
-
-// chart.js のグラフをクリアする
-qahm.clearPreChart = function( chartVar ) {
-	if ( typeof chartVar !== 'undefined' ) {
-		chartVar.destroy();
-	}
-}
-qahm.resetCanvas = function( canvasId, attr = '' ) {
-	let container = document.getElementById(canvasId).parentNode;
-	if (container) {
-        container.innerHTML = '&nbsp;';
-        container.innerHTML = `<canvas id="${canvasId}" ${attr}></canvas>`;
-    }
-}
 
 
 // 再生ボタンクリック

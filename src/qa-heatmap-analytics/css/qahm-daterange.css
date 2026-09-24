@@ -1,0 +1,212 @@
+/**
+ * qahm-daterange.css
+ * 日付範囲アダプタ（Cally / <calendar-range>）の共通スタイル（縦スクロール版 / #1317）。
+ * Cally 本体は Shadow DOM のため reset.css は内部に届かない。配色等のカスタマイズは
+ * CSS custom properties / ::part() 経由で行う。
+ *
+ * 縦スクロール版: データ期間（min〜max）の全月を縦に積み、スクロールで過去/未来へ移動する。
+ * 上部に固定ヘッダ（プリセット＋年/月クイックジャンプ）、下にスクロール領域（カレンダー）。
+ */
+
+/* FOUC 対策: カスタム要素が define されるまで非表示（スクリプトは footer 読み込みのため） */
+calendar-range:not(:defined),
+calendar-date:not(:defined),
+calendar-month:not(:defined) {
+	display: none;
+}
+
+.qahm-daterange {
+	display: inline-block;
+}
+
+/* 日付入力欄（トリガー）の背景を常に白に。読み込み中の disabled / 常時 readOnly で
+   ブラウザ既定のグレーが出るのを上書き。 */
+.qa-zero-date-range__input-area,
+.qa-zero-date-range__input-area:disabled,
+.qa-zero-date-range__input-area[readonly] {
+	background-color: #fff;
+	-webkit-text-fill-color: #1e1e1e;
+	opacity: 1;
+}
+/* クリック/フォーカス時のフォーカス枠（outline + テーマの box-shadow リング）を非表示。 */
+.qa-zero-content .qa-zero-date-range__input-area:focus,
+.qa-zero-content .qa-zero-date-range__input-area:focus-visible,
+.qa-zero-date-range__input-area:focus,
+.qa-zero-date-range__input-area:focus-visible {
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+/* ポップオーバー（案A）: トリガー直下に開くドロップダウン。
+   親要素（.qa-zero-date-range 等）に position: relative を与える前提。 */
+.qahm-daterange--popover {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	z-index: 1000;
+	margin-top: 4px;
+	padding: 0.75rem;
+	/* absolute + width:auto だと包含ブロック（入力欄の行）幅に縮むため、2カラムに足りる固定幅を与える。 */
+	width: 460px;
+	max-width: calc( 100vw - 40px );
+	box-sizing: border-box;
+	background: #fff;
+	border: 1px solid #c7d2dd;
+	border-radius: 6px;
+	box-shadow: 0 6px 24px rgba( 0, 0, 0, 0.16 );
+	display: none;
+}
+
+/* ポータル版（#1353・opt-in）: overflow:hidden のスクロール枠（アシスタント会話 UI 等）に埋め込む場合、
+   body 直下に fixed 配置して祖先のクリップ・offsetParent ずれを回避する。top/left は JS が
+   trigger の getBoundingClientRect から算出してインライン設定する。2クラス指定で上の absolute を上書き。 */
+.qahm-daterange--portal.qahm-daterange--popover {
+	position: fixed;
+	top: 0;
+	left: 0;
+	margin-top: 0;
+	/* WP 管理バー（#wpadminbar ≈ 99999/100000）より前面に。 */
+	z-index: 100001;
+}
+
+/* レイアウト（GA4 型）: 左=プリセット縦枠 / 右上=期間ジャンプセレクト / 右下=縦スクロールカレンダー。
+   インライン時は常時 grid、ポップオーバー時は is-open で grid。 */
+.qahm-daterange--vscroll:not( .qahm-daterange--popover ),
+.qahm-daterange--popover.is-open {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	grid-template-areas:
+		"presets monthnav"
+		"presets scroll";
+	column-gap: 0.85rem;
+	align-items: start;
+}
+.qahm-daterange-presets { grid-area: presets; }
+.qahm-daterange-monthnav { grid-area: monthnav; margin-bottom: 0.4rem; }
+.qahm-daterange-scroll { grid-area: scroll; }
+
+/* プリセット群（左の縦枠・右に区切り線） */
+.qahm-daterange-presets {
+	display: flex;
+	flex-direction: column;
+	flex-wrap: nowrap;
+	gap: 0.25rem;
+	padding-right: 0.85rem;
+	border-right: 1px solid #e4e8ee;
+	align-self: stretch;
+	min-width: 7rem;
+}
+/* GA4 風のテキストリスト（ボタン枠なし・左揃え・ホバーで薄い背景） */
+.qahm-daterange-preset {
+	display: block;
+	width: 100%;
+	padding: 0.35rem 0.6rem;
+	font-size: 0.8125rem;
+	line-height: 1.5;
+	text-align: left;
+	white-space: nowrap;
+	color: #333;
+	background: transparent;
+	border: 0;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.qahm-daterange-preset:hover {
+	background: #eef1f5;
+}
+.qahm-daterange-preset:focus-visible {
+	outline: 2px solid #5b7a9d;
+	outline-offset: -2px;
+}
+
+/* 年/月クイックジャンプ（選択月へスクロール）。下にボーダーでカレンダーと区切る。 */
+.qahm-daterange-monthnav {
+	display: flex;
+	gap: 0.4rem;
+	padding-bottom: 0.5rem;
+	border-bottom: 1px solid #e4e8ee;
+}
+.qahm-daterange-monthnav select {
+	padding: 0.2rem 0.4rem;
+	font-size: 0.8125rem;
+	line-height: 1.4;
+	color: #333;
+	background: #fff;
+	border: 1px solid #c7d2dd;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.qahm-daterange-monthnav select:hover {
+	border-color: #9aa7b5;
+}
+
+/* スクロール領域: 全月を縦積みし、ここだけをスクロールさせる。
+   末尾（最新月の下）に余白を持たせ、最下部までスクロールしたとき詰まって見えないように。 */
+.qahm-daterange-scroll {
+	max-height: 442px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding-bottom: 1.5rem;
+}
+
+/* 月を縦に積む（GA4 風）。各月の間隔を空ける。 */
+.qahm-daterange calendar-range::part(months) {
+	display: flex;
+	flex-direction: column;
+	gap: 1.25rem;
+	align-items: stretch;
+}
+
+/* 日付セル等のフォントをプリセット文言と同等に（既定はやや大きいため）。
+   font-size は継承プロパティなので Shadow DOM 内のセルにも届く。 */
+.qahm-daterange calendar-month {
+	font-size: 0.8125rem;
+}
+
+/* Cally 既定の月見出し（月のみ・年なし）は隠し、自前の「年 月」ラベルを使う。 */
+.qahm-daterange calendar-month::part(heading) {
+	display: none;
+}
+
+/* 自前の年月ラベル（例: 2026年6月 / June 2026）。各月カレンダーの上に表示。 */
+.qahm-daterange-monthlabel {
+	font-weight: 700;
+	text-align: center;
+	padding: 0.5rem 0 0.35rem;
+	font-size: 0.9rem;
+	color: #2b3a48;
+}
+
+/* Cally 既定の前後ナビ（‹ ›）と全体見出しは縦スクロールでは不要 → 非表示。
+   各月の月見出し（calendar-month::part(heading)）は上で別途表示している。 */
+.qahm-daterange calendar-range::part(previous),
+.qahm-daterange calendar-range::part(next),
+.qahm-daterange calendar-range::part(heading) {
+	display: none;
+}
+
+/* Cally のアクセント配色（選択端＝開始/終了日）を旧 daterangepicker に合わせる（#357ebd）。
+   日付セルは calendar-month の Shadow 内 :host{--color-accent:black} が既定で当たるため、
+   外側から calendar-month を直接指定して上書きする。 */
+.qahm-daterange calendar-range,
+.qahm-daterange calendar-month {
+	--color-accent: #357ebd !important;
+	--color-text-on-accent: #fff !important;
+}
+
+/* 範囲の内側（開始日と終了日の間）は旧 UI の淡い青。 */
+.qahm-daterange calendar-month::part(range-inner) {
+	background-color: #ebf4f8 !important;
+	color: #000 !important;
+}
+
+/* 範囲の最初/最後の日を角丸に（start=左角丸 / end=右角丸 / 単日=全周角丸）。 */
+.qahm-daterange calendar-month::part(range-start) {
+	border-radius: 4px 0 0 4px !important;
+}
+.qahm-daterange calendar-month::part(range-end) {
+	border-radius: 0 4px 4px 0 !important;
+}
+.qahm-daterange calendar-month::part(range-start range-end) {
+	border-radius: 4px !important;
+}

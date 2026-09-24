@@ -1,8 +1,5 @@
 var qahm = qahm || {};
 
-qahm.chChart = null;
-qahm.smChart = null;
-
 if ( typeof qahm.tracking_id === 'undefined' ) {
 	let url         = new URL(window.location.href);
 	let params      = url.searchParams;
@@ -20,7 +17,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'new_user', label: qahml10n['table_new_user'], width: 9, type: 'integer' },
 		{ key: 'session', label: qahml10n['table_session'], width: 9, type: 'integer' },
 		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 9, type: 'percentage' },
-		{ key: 'page_session', label: qahml10n['table_page_session'], width: 9, type: 'float' },
+		{ key: 'page_session', label: qahml10n['table_page_session'], width: 9, type: 'float', agg: { type: 'wavg', weightKey: 'session' } }, // Issue #1175: ページ/セッションは session 加重平均
 		{ key: 'avg_session_time', label: qahml10n['table_avg_session_time'], width: 9, type: 'duration' },
 		{ key: 'goal_conversion_rate', label: qahml10n['table_goal_conversion_rate'], width: 9, type: 'percentage' },
 		{ key: 'goal_completions', label: qahml10n['table_goal_completions'], width: 9, type: 'integer' },
@@ -32,6 +29,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -39,7 +37,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			direction: 'desc'
 		},
 	};
-	channelTable = qaTable.createTable('#tb_channels', channelHeader, channelOptions);
+	channelTable = qaTable.createTable('#tb_channels', channelHeader, { ...channelOptions, totalRow: { weightKey: 'session', label: qahml10n['table_total'], selectable: true, checkedByDefault: true } }); // Issue #1175: 合計行（ソート対象の1行・率は session 加重平均・graph チェックで全体推移）
 
     let chradios = document.getElementsByName( `js_chGoals` );
     for ( let jjj = 0; jjj < chradios.length; jjj++ ) {
@@ -63,7 +61,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		{ key: 'new_user', label: qahml10n['table_new_user'], width: 8, type: 'integer' },
 		{ key: 'session', label: qahml10n['table_session'], width: 8, type: 'integer' },
 		{ key: 'bounce_rate', label: qahml10n['table_bounce_rate'], width: 8, type: 'percentage' },
-		{ key: 'page_session', label: qahml10n['table_page_session'], width: 8, type: 'float' },
+		{ key: 'page_session', label: qahml10n['table_page_session'], width: 8, type: 'float', agg: { type: 'wavg', weightKey: 'session' } }, // Issue #1175: ページ/セッションは session 加重平均
 		{ key: 'avg_session_time', label: qahml10n['table_avg_session_time'], width: 8, type: 'duration' },
 		{ key: 'goal_conversion_rate', label: qahml10n['table_goal_conversion_rate'], width: 8, type: 'percentage' },
 		{ key: 'goal_completions', label: qahml10n['table_goal_completions'], width: 8, type: 'integer' },
@@ -75,6 +73,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		exportable: true,
 		sortable: true,
         filtering: true,
+		columnToggle: true,
 		maxHeight: 600,
 		stickyHeader: true,
 		initialSort: {
@@ -82,7 +81,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			direction: 'desc'
 		},
 	};
-	sourceMediumTable = qaTable.createTable('#tb_sourceMedium', sourceMediumHeader, sourceMediumOptions);
+	sourceMediumTable = qaTable.createTable('#tb_sourceMedium', sourceMediumHeader, { ...sourceMediumOptions, totalRow: { weightKey: 'session', label: qahml10n['table_total'], selectable: true, checkedByDefault: true, values: { media: qahml10n['table_total'] } } }); // Issue #1175: 合計行（率は session 加重平均・media にも「合計」を入れグラフ複合名「合計｜合計」を成立）
 
     let smradios = document.getElementsByName( `js_smGoals` );
     for ( let jjj = 0; jjj < smradios.length; jjj++ ) {
@@ -111,7 +110,7 @@ qahm.changeChGoal = function(e) {
 		}
 	}
 
-	channelTable.updateData(qahm.chArray[gid]);
+	channelTable.updateData(qahm.chArray[gid].slice(1)); // Issue #1175: 先頭の合計行を除外
 };
 qahm.changeSmGoal = function(e) {
     let checkedId = e.target.id;
@@ -134,7 +133,7 @@ qahm.changeSmGoal = function(e) {
 		}
 	}
 
-	sourceMediumTable.updateData(qahm.smArray[gid]);
+	sourceMediumTable.updateData(qahm.smArray[gid].slice(1)); // Issue #1175: 先頭の合計行を除外
 };
 
 
@@ -154,7 +153,15 @@ jQuery(
 jQuery(document).on('qahm:dateRangeChanged', function( RangeStart, RangeEnd ) {
 	qahm.nowAjaxStep = 0;
 	qahm.renderAcquisitionData(reportDateBetween);
-
+	// [Issue #1231] チャネル別 / SNS 別テーブルとも All Goals (gid=0) で再描画されるため、UI のラジオも同期させる
+	let chAllGoalsRadio = document.getElementById( 'js_chGoals_0' );
+	if ( chAllGoalsRadio ) {
+		chAllGoalsRadio.checked = true;
+	}
+	let smAllGoalsRadio = document.getElementById( 'js_smGoals_0' );
+	if ( smAllGoalsRadio ) {
+		smAllGoalsRadio.checked = true;
+	}
 });
 
 
@@ -179,6 +186,11 @@ qahm.renderAcquisitionData = function(dateBetweenStr) {
 			qahm.disabledGoalRadioButton();
 			channelTable.showLoading();
 			sourceMediumTable.showLoading();
+			// グラフのローディングも開始時に出す（#1294）。ch/sm チャートの create は後段の
+			// getCh/getSm ステップなので、ここで出さないと先行 ajax 中はグラフ領域が空白になる。
+			// 各 create が自動で消す
+			qahm.EChart.loading( 'ch-chart' );
+			qahm.EChart.loading( 'sm-chart' );
 
             qahm.nowAjaxStep = 'getGoals';
             qahm.renderAcquisitionData(dateBetweenStr);
@@ -431,12 +443,8 @@ qahm.renderAcquisitionData = function(dateBetweenStr) {
                             }
                         }
 
-						// 「合計」行のチェックボックスだけtrueにする
-						for (let iii = 0; iii < qahm.chArray.length; iii++) {
-							qahm.chArray[iii][0][0] = true;
-						}
-
-						channelTable.updateData(qahm.chArray[0]);
+						// Issue #1175: サーバー先頭の合計行(index 0)を除外して渡す（合計は qaTable が計算で生成）
+						channelTable.updateData(qahm.chArray[0].slice(1));
 					} else {
 						channelTable.updateData([]);
 					}
@@ -539,12 +547,8 @@ qahm.renderAcquisitionData = function(dateBetweenStr) {
                             }
                         }
 						
-						// 「合計」行のチェックボックスだけtrueにする
-						for (let iii = 0; iii < qahm.smArray.length; iii++) {
-							qahm.smArray[iii][0][0] = true;
-						}
-
-						sourceMediumTable.updateData(qahm.smArray[0]);
+						// Issue #1175: サーバー先頭の合計行(index 0)を除外して渡す（合計は qaTable が計算で生成）
+						sourceMediumTable.updateData(qahm.smArray[0].slice(1));
 					} else {
 						sourceMediumTable.updateData([]);
 					}
@@ -613,8 +617,10 @@ jQuery( document ).on( 'click',	'#sm-chart-button', function(){
 // reportDateBetween, dateRangeYmdAry, reportRangeStart, reportRangeEnd を使う↓（が、引数には入れていない）
 qahm.checkedDataToDrawGraph = function( type ) {
 	let action   = 'qahm_ajax_get_' + type + '_days_data';
+	let chartId  = ( 'ch' === type ) ? 'ch-chart' : 'sm-chart';
 	let nameAry  = [];
 	let checkAry = null;
+	qahm.EChart.loading( chartId ); // データ取得中の表情（#1294。create が自動で消す）
 	switch ( type ) {
 		case 'ch':
 			checkAry = channelTable.getCheckedData('graph');
@@ -653,10 +659,8 @@ qahm.checkedDataToDrawGraph = function( type ) {
 		}
 	).done(
 		function( dataAry ){
-			const colorAry = [ 'rgb(5, 141, 199)', 'rgb(237, 126, 23)', 'rgb(80, 180, 50)', 'rgb(175, 73, 197)', 'rgb(237, 239, 0)', 'rgb(128, 128, 255)', 'rgb(128, 128, 255)', 'rgb(160, 164, 36)', ];
-
-			// 各チャネルの日付ごとのデータを作成
-			let graphAry = [];
+			// 各チャネルの日付ごとのデータを作成（#1280: qahm.EChart ラッパ経由・色はテーマパレット）
+			let graphSeries = [];
 			for( let nameIdx = 0; nameIdx < nameAry.length; nameIdx++ ){
 				let sessionAry = [];
 				const name = nameAry[nameIdx];
@@ -667,88 +671,29 @@ qahm.checkedDataToDrawGraph = function( type ) {
 					} else {
 						sessionAry.push( 0 );
 					}
-					
+
 				}
-				graphAry.push( {
-					label: name,
+				graphSeries.push( {
+					name: name,
 					type: 'line',
-					fill: false,
 					data: sessionAry,
-					borderColor: colorAry[nameIdx],
-					borderJoinStyle: 'bevel',
-					yAxisID: 'main-y-axis',
-					lineTension: 0,
 				} );
 			}
 
-			let id = '';
-			switch ( type ) {
-				case 'ch':
-					if ( qahm.chChart !== null ) {
-						qahm.chChart.destroy();
-					}
-					id = 'ch-chart-canvas';
-					break;
-				case 'sm':
-					if ( qahm.smChart !== null ) {
-						qahm.smChart.destroy();
-					}
-					id = 'sm-chart-canvas';
-					break;
-			}
-			let container = document.getElementById(id).parentNode;
-			if (container) {
-				container.innerHTML = '<canvas id="' + id + '" class="chart-container"></canvas>';
-			}
-		
-			let ctx = document.getElementById(id).getContext('2d');
 			let labelsDates = qahm.makeFormattedDatesArray( reportRangeStart, reportRangeEnd, 'MM/DD' );
-			let chart = new Chart(ctx, {
-				type: 'bar',
-				data: {
-					labels: labelsDates,
-					datasets: graphAry,
-				},
-				options: {
-					tooltips: {
-						mode: 'nearest',
-						intersect: false,
-					},
-					responsive: true,
-					maintainAspectRatio: false,
-					scales: {
-						yAxes: [{
-							id: 'main-y-axis',
-							type: 'linear',
-							position: 'left',
-							ticks: {
-								min: 0,
-							},
-						}, ],
-						xAxes: [{
-							ticks: {
-								autoSkip: true,
-								maxRotation: 0,
-								minRotation: 0,
-								maxTicksLimit: 10
-							}
-						}]
-					},
-				}
-			});
-		
-			switch ( type ) {
-				case 'ch':
-					qahm.chChart = chart;
-					break;
-				case 'sm':
-					qahm.smChart = chart;
-					break;
-			}
+			// 冪等 create: 2回目以降は同インスタンスに notMerge 全置換（系列数の増減も残骸なく反映される）
+			qahm.EChart.create( chartId, {
+				kind: 'line',
+				labels: labelsDates,
+				series: graphSeries,
+				legend: true,
+				maxXTicks: 10,
+			} );
 		}
 	).fail(
 		function( jqXHR, textStatus, errorThrown ){
 			qahm.log_ajax_error( jqXHR, textStatus, errorThrown );
+			qahm.EChart.loading( chartId, false );
 			qahm.nowAjaxStep = 'error';
 			alert( 'error' );
 		}

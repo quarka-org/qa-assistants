@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/chart.schema.json",
+  "title": "Chart definition",
+  "description": "A chart rendered from a row-array variable via the shared ECharts wrapper (qahm.EChart). For pie / doughnut / hbar only the first series entry is used.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "type", "x", "series"],
+  "properties": {
+    "title": { "type": "string", "description": "May be a 't:' translation reference." },
+    "source": {
+      "type": "string",
+      "pattern": "^\\$",
+      "description": "Variable reference holding the row array (must start with $)."
+    },
+    "type": {
+      "enum": ["bar", "line", "pie", "doughnut", "hbar"],
+      "description": "Chart kind. hbar = horizontal bar (rows are shown top-to-bottom in the given order)."
+    },
+    "x": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Row field used as the category axis label (pie/doughnut: slice name)."
+    },
+    "series": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field"],
+        "properties": {
+          "field": { "type": "string", "minLength": 1, "description": "Row field holding the numeric value." },
+          "label": { "type": "string", "description": "Legend label. May be a 't:' translation reference. Defaults to field." },
+          "type": { "enum": ["bar", "line"], "description": "Per-series override for bar/line charts (mixed bar+line)." },
+          "color": { "type": "string", "description": "Hex color (e.g. #69A4E2). Defaults to the shared theme palette. Ignored for pie / doughnut (slice colors come from the palette)." }
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "description": "Renderer options (e.g. height in px). Unknown keys are ignored."
+    }
+  }
+}

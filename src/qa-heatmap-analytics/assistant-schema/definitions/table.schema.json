@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://quarka.org/schema/assistant/definitions/table.schema.json",
+  "title": "Table definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "columns"],
+  "properties": {
+    "title": { "type": "string", "description": "May be a 't:' translation reference." },
+    "source": {
+      "type": "string",
+      "pattern": "^\\$",
+      "description": "Variable reference holding the row array (must start with $)."
+    },
+    "columns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "label", "type"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "type": {
+            "enum": ["string", "integer", "float", "percentage", "currency", "date", "datetime", "duration", "link", "boolean", "filesize", "scorebar", "badge", "html"]
+          },
+          "type_options": { "type": "object" },
+          "color_thresholds": {
+            "type": "array",
+            "description": "Issue #1403: value-dependent cell background coloring for numeric columns. First matching rule wins; the cell gets a qa-cell-<level> class.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["op", "value", "level"],
+              "properties": {
+                "op": { "enum": ["lt", "lte", "gte", "gt", "between"] },
+                "value": { "type": "number" },
+                "value2": { "type": "number", "description": "Upper bound for op:between (inclusive)." },
+                "level": { "enum": ["good", "mid", "bad", "info"] }
+              },
+              "if": { "properties": { "op": { "const": "between" } } },
+              "then": { "required": ["op", "value", "value2", "level"] }
+            }
+          },
+          "width": { "type": ["string", "number"] },
+          "hidden": {
+            "type": "boolean",
+            "description": "If true, the column is not rendered but its value is carried on each row so row_action.set can reference it via $row.<key> (e.g. machine keys like page_id / keyword). Issue #1386."
+          }
+        }
+      }
+    },
+    "initial_sort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["column", "direction"],
+      "properties": {
+        "column": { "type": "string" },
+        "direction": { "enum": ["asc", "desc"] }
+      }
+    },
+    "options": { "type": "object" }
+  }
+}

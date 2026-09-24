@@ -791,27 +791,54 @@ qahm.actionSwitchSpeed = function( isNext ) {
 }
 
 qahm.loadOgpImages = function() {
+	// 同じURLは1本にまとめ、さらに1本ずつ順番に取得する。
+	// 全ページぶんを一度に投げると、サーバーのPHPワーカーを使い切って
+	// 次のページへの移行そのものが返らなくなる（#1597）。
+	// キーはページURL。__proto__ 等の特別なキーに当たる経路を作らないため prototype なしで持つ。
+	const targets = Object.create( null );
+	const urls    = [];
+
 	jQuery('#playlist .playlist-item').each(function() {
-		const $item = jQuery(this);
-		const $img = $item.find('.playlist-item-thumb img');
-		
+		const $item   = jQuery(this);
 		const pageUrl = $item.data('page-url');
-		
-		if ( pageUrl ) {
-			jQuery.ajax({
-				type: 'POST',
-				url: qahm.ajax_url,
-				dataType: 'json',
-				data: {
-					'action': 'qahm_ajax_get_ogp_image',
-					'url': pageUrl
-				}
-			}).done(function(response) {
-				if ( response.success && response.image_url ) {
-					$img.attr('src', response.image_url);
-				}
-			}).fail(function() {
-			});
+
+		if ( ! pageUrl ) {
+			return;
 		}
+
+		if ( ! targets[pageUrl] ) {
+			targets[pageUrl] = [];
+			urls.push(pageUrl);
+		}
+		targets[pageUrl].push($item.find('.playlist-item-thumb img'));
 	});
+
+	function loadNext( index ) {
+		if ( index >= urls.length ) {
+			return;
+		}
+
+		const pageUrl = urls[index];
+
+		jQuery.ajax({
+			type: 'POST',
+			url: qahm.ajax_url,
+			dataType: 'json',
+			data: {
+				'action': 'qahm_ajax_get_ogp_image',
+				'url': pageUrl
+			}
+		}).done(function(response) {
+			if ( response && response.success && response.image_url ) {
+				jQuery.each(targets[pageUrl], function(i, $img) {
+					$img.attr('src', response.image_url);
+				});
+			}
+		}).always(function() {
+			// 成否にかかわらず次の1本へ進める（同時に走らせないことが目的）。
+			loadNext( index + 1 );
+		});
+	}
+
+	loadNext( 0 );
 };

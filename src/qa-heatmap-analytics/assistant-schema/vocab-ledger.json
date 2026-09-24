@@ -1,0 +1,91 @@
+{
+  "$comment": "語彙の裁定台帳（Issue #1307 / ロードマップ C-1）。「実装済みの語彙 × 宣言の有無 × 裁定」の対応の正本。test/vocab-ledger-check.js が実態（runtime のソース・schema 定義・validator の要求定数）と突合し、どの向きのズレでも CI が落ちる。裁定そのものは人が決めてここに書き留める（機械は「書いてあることと実態が合っているか」だけを見る）。ruling の語彙は adopted（正式・schema 宣言必須）/ frozen（実装温存・新規では使わない・schema 宣言なし必須）/ planned（仕様だけ先・実装も宣言もなし）の3つだけ。凍結の理由と昇格条件の文章としての正典は docs/specs/assistant/data-sources.md の「凍結語彙（実装はあるが、新規では使わない）」節。",
+  "transform_steps": {
+    "$comment": "実装アンカー＝runtime applyTransforms の分岐（検査①が機械突合する。①はこのセクション限定＝design-vocab-ledger-ci-20260730.md §7-a）。宣言アンカー＝definitions/transform-step.schema.json の oneOf。",
+    "sort":         { "ruling": "adopted", "declared": true },
+    "limit":        { "ruling": "adopted", "declared": true },
+    "filter":       { "ruling": "adopted", "declared": true },
+    "group_by":     { "ruling": "adopted", "declared": true },
+    "calc":         { "ruling": "adopted", "declared": true },
+    "lookup":       { "ruling": "adopted", "declared": true },
+    "set_var":      { "ruling": "adopted", "declared": true },
+    "tally":        { "ruling": "adopted", "declared": true, "since": "2.10.0", "min_core_version": "2.10.0" },
+    "extract_host": { "ruling": "adopted", "declared": true, "since": "2.12.0", "min_core_version": "2.12.0" },
+    "combine":      { "ruling": "frozen",  "declared": false,
+                      "reason": "多クエリ層（queries[]）とセットの語彙。単独では意味を持たず、queries[] データソースの transform[0] 専用（位置違反は runtime が専用メッセージで throw）",
+                      "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要（data-sources.md「凍結語彙」節の昇格条件と同一）" },
+    "join":         { "ruling": "planned" },
+    "rename":       { "ruling": "planned" },
+    "pick":         { "ruling": "planned" }
+  },
+  "data_source_types": {
+    "$comment": "宣言アンカー＝definitions/data-source.schema.json の properties.type。実装側の機械抽出アンカーは無い（検査①対象外・凍結の保証は検査③が担う）。",
+    "qal":        { "ruling": "adopted", "declared": true },
+    "native_qal": { "ruling": "frozen",  "declared": false,
+                    "reason": "QAL ネイティブ JSON を素通しで Executor に渡す経路（T22-1）。多クエリ層とセットで、簡易クエリ（qal）との二重語彙になるため新規では使わない",
+                    "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" }
+  },
+  "data_source_keys": {
+    "$comment": "data_source オブジェクト**直下**の凍結キー（このセクションに置くのは runtime が ds.<key> で読むキーだけ＝検査③が data-source.schema.json の properties と突合できる層。専属レビュー 🟡-1＝直下でないキーを置くと検査③が『成立しようのない条件』を確かめて常に PASS する）。宣言アンカー＝definitions/data-source.schema.json の properties（additionalProperties:false のため未宣言キーは自動拒否）。正式キー（query / into / transform / type）は schema required/properties が正本＝ここには凍結キーのみ列挙する。",
+    "queries":          { "ruling": "frozen", "declared": false,
+                          "reason": "多クエリ層の入口（N 本の QAL を逐次発行して $results dict に格納）。特定顧客向けデモのための機構で用途が未確定",
+                          "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" },
+    "loading_text":     { "ruling": "frozen", "declared": false,
+                          "reason": "queries[] 逐次発行時の進捗表示文言。多クエリ層とセット",
+                          "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" }
+  },
+  "multi_query_layer_keys": {
+    "$comment": "多クエリ層の**内側**の凍結キー（記録のみ＝機械検査対象外）。所在＝for_each / label / qal は queries[i] 要素のキー・sources_template は combine オペレータのキー（専属レビュー 🟡-1 の実測）＝data_source 直下ではないため、親 queries が schema 未宣言である限り schema 経由では書けない（＝凍結の実効性は data_source_keys.queries の検査③が親ごと担保する）。queries を昇格させる日が来たら、この層の個別検査をそのとき設計する（このセクションはその日のための所在メモ）。",
+    "for_each":         { "ruling": "frozen", "declared": false,
+                          "reason": "queries[i] 要素のキー＝クエリの静的展開（T22brand-3）。多クエリ層とセット",
+                          "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" },
+    "sources_template": { "ruling": "frozen", "declared": false,
+                          "reason": "combine オペレータのキー＝_dynamic_months と組で系列を生成するテンプレート。多クエリ層とセット",
+                          "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" },
+    "label":            { "ruling": "frozen", "declared": false,
+                          "reason": "queries[i] 要素のキー＝$results dict の格納名",
+                          "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" },
+    "qal":              { "ruling": "frozen", "declared": false,
+                          "reason": "queries[i] 要素のキー＝発行する QAL ネイティブ JSON 本体",
+                          "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" }
+  },
+  "agg_functions": {
+    "$comment": "group_by の agg（と tally の集計）の関数語彙（専属レビュー ⚪-1＝#1510 でまさに動いた層）。実装アンカー＝runtime aggregate の switch case＋count_distinct の早期分岐＋fail-loud throw メッセージの supported 一覧（三者を検査⑧が突合）。宣言アンカー＝transform-step.schema.json の agg additionalProperties enum。",
+    "sum":            { "ruling": "adopted", "declared": true },
+    "avg":            { "ruling": "adopted", "declared": true },
+    "count":          { "ruling": "adopted", "declared": true },
+    "count_distinct": { "ruling": "adopted", "declared": true, "since": "2.10.0" },
+    "min":            { "ruling": "adopted", "declared": true },
+    "max":            { "ruling": "adopted", "declared": true },
+    "first":          { "ruling": "adopted", "declared": true }
+  },
+  "manifest_root_keys": {
+    "$comment": "宣言アンカー＝manifest.schema.json の properties（additionalProperties:false のため未宣言キーは自動拒否）。実装側の機械抽出アンカーは無い（検査①対象外）。凍結キーのみ列挙する（正式なルートキーは schema required/properties が正本）。",
+    "params": { "ruling": "frozen", "declared": false,
+                "reason": "_dynamic_months / sources_template（多クエリ層）用の実行時パラメータ置き場。新形式では vars が同じ役割を担う",
+                "promotion_condition": "多クエリ層の案件本番化 or 新形式アシスタントでの実需要" }
+  },
+  "if_operators": {
+    "$comment": "step の if がサポートする条件演算子（第5の層＝Issue #1543 / B-6 で追加）。実装アンカー＝runtime AssistantRuntime.IF_OPERATORS（検査⑨が機械突合する）。宣言アンカー＝definitions/step.schema.json の ifSingleCondition.is enum。比較の実装は transform.filter / tally の when と共有（matchOperator・#1308）＝ここは「if から書ける語彙はどれか」の裁定だけを持つ。contains は意図的に不在（if が見るのは vars のスカラー値で、部分一致は filter＝データ列の領分）。",
+    "empty":     { "ruling": "adopted", "declared": true },
+    "not_empty": { "ruling": "adopted", "declared": true },
+    "eq":        { "ruling": "adopted", "declared": true },
+    "neq":       { "ruling": "adopted", "declared": true },
+    "gt":        { "ruling": "adopted", "declared": true },
+    "gte":       { "ruling": "adopted", "declared": true },
+    "lt":        { "ruling": "adopted", "declared": true },
+    "lte":       { "ruling": "adopted", "declared": true },
+    "in":        { "ruling": "adopted", "declared": true, "since": "2.13.0", "min_core_version": "2.13.0",
+                   "$comment": "min_core_version の要求定数 IF_CONTAINER_MIN は if の器の拡張（all / else / then.set / in）をまとめて 2.13.0 で要求する。構造側（all / else / then.set）は語彙トークンを持たないので、台帳では代表として in がこの定数と対応する。" }
+  },
+  "format_specifiers": {
+    "$comment": "テンプレート {$var|<specifier>} の書式指定子（第4の層＝design-vocab-ledger-ci-20260730.md §7-b）。実装アンカー＝runtime formatValue の switch case（検査⑦が機械突合する）。schema 宣言は無い層（テンプレ文字列内）＝declared キーは持たない。第2弾 B-5（Issue #1575）で round / before / after を追加＝引数つきの形を含む。引数の要求（0=なし / 1=整数 / 2=必須の文字列リテラル）は validator ref-checks.js の FORMAT_ARITY が正本。",
+    "integer":    { "ruling": "adopted" },
+    "float":      { "ruling": "adopted" },
+    "percentage": { "ruling": "adopted" },
+    "duration":   { "ruling": "adopted" },
+    "round":      { "ruling": "adopted", "min_core_version": "2.14.0" },
+    "before":     { "ruling": "adopted", "min_core_version": "2.14.0" },
+    "after":      { "ruling": "adopted", "min_core_version": "2.14.0" }
+  }
+}

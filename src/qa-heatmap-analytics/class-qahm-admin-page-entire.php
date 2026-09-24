@@ -59,7 +59,7 @@ class QAHM_Admin_Page_Entire extends QAHM_Admin_Page_Base {
 			$sitemanage = array();
 		}
 
-		$sitemanage[] = array(
+		$new_site = array(
 			'site_id'                => $this->wrap_count( $sitemanage ),
 			'url'                    => $domain_url,
 			'domain'                 => $parse_url['host'],
@@ -74,6 +74,12 @@ class QAHM_Admin_Page_Entire extends QAHM_Admin_Page_Base {
 			'anontrack'              => ( QAHM_TYPE === QAHM_TYPE_WP ) ? 1 : 0,
 			'insert_datetime'        => $qahm_time->now_str(),
 		);
+		// timezone はデータ契約「IANA か未設定」に従い、確定 IANA があるときだけキーを書く（Assistants は単一サイト＝WP-TZ）
+		$store_tz = QAHM_Time::resolve_store_timezone();
+		if ( '' !== $store_tz ) {
+			$new_site['timezone'] = $store_tz;
+		}
+		$sitemanage[] = $new_site;
 
 		$res = $this->wrap_update_option( 'sitemanage', $sitemanage );
 

@@ -136,6 +136,21 @@ qahm.renderAssistantSelector = function() {
 		</div>
 		<div class="qahm-assistant-selector-cards">`;
 
+        // Issue #1580（検査 段2）: パッケージ検査の警告バッジ。警告のみモードでは不合格でも一覧に残し、
+        // 理由（E_PKG_* の path と message）をカードに出す。サーバー由来の文字列はここでエスケープする。
+        const escapePkgText = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const buildPkgBadge = (assistant) => {
+            const pkg = assistant && assistant.package;
+            if (!pkg || pkg.valid !== false || !Array.isArray(pkg.errors) || pkg.errors.length === 0) return '';
+            const items = pkg.errors.map((e) => `<li>${escapePkgText(e.code)} ${escapePkgText(e.path)} — ${escapePkgText(e.message)}</li>`).join('');
+            return `
+					<div class="qahm-assistant-selector-pkg" title="${escapePkgText(qahml10n['pkg_check_warning'] || 'Package check')}">
+						<span class="qahm-assistant-selector-pkg-badge">⚠ ${escapePkgText(qahml10n['pkg_check_warning'] || 'Package check: needs attention')}</span>
+						<ul class="qahm-assistant-selector-pkg-reason">${items}</ul>
+					</div>`;
+        };
+
         Object.keys(qahm.allAssistants).forEach((key) => {
 		const assistant = qahm.allAssistants[key];
 		html += `
@@ -144,7 +159,7 @@ qahm.renderAssistantSelector = function() {
 				<div class="qahm-assistant-selector-info">
 					<div class="qahm-assistant-selector-name" data-assistant-slug="${assistant.slug}">${assistant.name}</div>
 					<div class="qahm-assistant-selector-description">${assistant.description}</div>
-					<div class="qahm-assistant-selector-version">v${assistant.version}</div>
+					<div class="qahm-assistant-selector-version">v${assistant.version}</div>${buildPkgBadge(assistant)}
 				</div>
 			</div>`;
         });
@@ -225,11 +240,11 @@ qahm.renderAssistantSelector = function() {
 
             if (event.currentTarget.contains(event.target)) {
                 let header = document.querySelector('.qa-zero-header__title');
-                if ( header ) {
+                if ( header && ! header.dataset.qahmReloadOnClick ) {
+                    header.dataset.qahmReloadOnClick = '1';
                     header.style.cursor = 'pointer';
                     header.addEventListener('click', function() {
                         location.reload();
-                        exit;
                     });
                 }
 
