@@ -720,23 +720,16 @@ abstract class QAHM_Core_Base {
 	/**
 	 * 安全な json_decode() ラッパー（本体／static）
 	 *
-	 * ファイル読み出し用。簡易的な serialize データのチェックも行う。
-	 * シリアライズデータを検出した場合は wrap_unserialize_static() を呼び出す。
+	 * ファイル読み出し用。JSON として読めなければ null を返す。
+	 * シリアライズデータは扱わない（JSON を読むつもりの場所で unserialize させないため）。
 	 *
-	 * @param string|null $data JSON 文字列またはシリアライズデータ.
+	 * @param string|null $data JSON 文字列.
 	 * @param bool        $assoc true の場合、連想配列として返す。false の場合、stdClass オブジェクトとして返す。
 	 * @return mixed デコード結果（エラー時は null）.
 	 */
 	protected static function wrap_json_decode_static( $data, $assoc = false ) {
 		if ( $data === null || $data === '' ) {
 			return null;
-		}
-
-		// シリアライズデータの検出（先頭 2 文字でざっくり判定）.
-		$str = static::wrap_substr_static( $data, 0, 2 );
-		$ary = array( 'a:', 'b:', 'd:', 'i:', 'O:', 's:' );
-		if ( static::wrap_in_array_static( $str, $ary, true ) ) {
-			return static::wrap_unserialize_static( $data );
 		}
 
 		$result = json_decode( $data, $assoc );
@@ -763,6 +756,13 @@ abstract class QAHM_Core_Base {
 	 * serialize のラップ関数（本体／static）
 	 *
 	 * igbinary 拡張が利用可能な場合は igbinary_serialize を使用。
+	 *
+	 * 保存してよいのは配列・スカラー・stdClass だけ。
+	 * WordPress のオブジェクト（WP_Post / WP_User / WP_Term / WP_Error など）や DateTime、
+	 * 独自クラスのオブジェクトは、配列に直してから保存すること。
+	 * wrap_unserialize_static() は stdClass 以外のオブジェクトを作らない（__PHP_Incomplete_Class になる）ため、
+	 * 読み戻したときに機能が壊れる。igbinary の環境ではそのまま読めてしまうので、
+	 * ZERO（igbinary あり）で動いても Assistants（多くは igbinary なし）で壊れる、という形で表に出る。
 	 *
 	 * @param mixed $value シリアライズ対象.
 	 * @return string シリアライズされたデータ.
@@ -792,6 +792,15 @@ abstract class QAHM_Core_Base {
 	 * 失敗した場合は従来の unserialize を使用。
 	 * 破損したシリアライズデータの修復も試みる。
 	 *
+	 * unserialize で作るオブジェクトは stdClass だけに限る（allowed_classes）。
+	 * stdClass 以外のクラスは __PHP_Incomplete_Class になり、__wakeup / __destruct などは呼ばれない。
+	 * stdClass はマジックメソッドを持たないので、許可してもオブジェクトインジェクションの足場にならない。
+	 * version_hist などが stdClass を保存して -> で読んでいるため、allowed_classes を false にはできない。
+	 * 保存してよいものの約束事は wrap_serialize_static() を参照。
+	 *
+	 * igbinary_unserialize にはクラスを制限する手段が無い。
+	 * igbinary の環境（ZERO の本番など）で igbinary の形式を読む場合、この制限は適用されない。
+	 *
 	 * @param string $data シリアライズされたデータ.
 	 * @return mixed デシリアライズされたデータ（失敗時は false）.
 	 */
@@ -809,16 +818,107 @@ abstract class QAHM_Core_Base {
 		}
 
 		// 失敗したら従来の unserialize。
-		// phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- バックトラック制限の一時的な緩和のため
-		ini_set( 'pcre.backtrack_limit', 5000000 );
+		// stdClass 以外のクラスが含まれていれば記録する（オブジェクトは作らない）.
+		self::log_disallowed_classes( $data );
 
-		$arr = @unserialize( $data ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr = self::unserialize_stdclass_only( $data );
 
 		if ( false !== $arr ) {
 			return $arr;
 		}
 
-		// ここから先は、破損シリアライズデータの修復処理（既存ロジックを維持）.
+		return self::unserialize_with_repair( $data );
+	}
+
+	/**
+	 * stdClass 以外のオブジェクトを作らない unserialize
+	 *
+	 * @param string $data シリアライズされたデータ.
+	 * @return mixed デシリアライズされたデータ（失敗時は false）.
+	 */
+	private static function unserialize_stdclass_only( $data ) {
+		return @unserialize( $data, array( 'allowed_classes' => array( 'stdClass' ) ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+	}
+
+	/**
+	 * シリアライズデータに stdClass 以外のクラスが含まれていれば qalog に警告を書く
+	 *
+	 * オブジェクトは「O:長さ:"クラス名"」（Serializable は「C:」）の形で書かれるので、
+	 * unserialize する前の文字列を1回だけ見て判定する（結果の配列をたどらない）。
+	 * 文字列の値の中にたまたま同じ並びがあった場合も記録される。
+	 * 書くのはクラス名と呼び出し元だけで、データの中身は書かない。
+	 *
+	 * @param string $data シリアライズされたデータ.
+	 * @return void
+	 */
+	private static function log_disallowed_classes( $data ) {
+		global $qahm_log;
+		if ( ! $qahm_log || ! is_string( $data ) ) {
+			return;
+		}
+
+		if ( ! preg_match_all( '/[OC]:\d+:"(?!(?i:stdClass)")([A-Za-z0-9_\\\\]+)"/', $data, $matches ) ) {
+			return;
+		}
+
+		$names = array();
+		foreach ( array_unique( $matches[1] ) as $name ) {
+			$names[] = substr( $name, 0, 100 );
+			if ( count( $names ) >= 5 ) {
+				break;
+			}
+		}
+
+		// 呼び出し元（このファイルの外で最初に出てくる場所）.
+		$caller = 'unknown';
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- Used only to record the caller when disallowed classes are found.
+		foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 6 ) as $frame ) {
+			if ( isset( $frame['file'] ) && __FILE__ !== $frame['file'] ) {
+				$caller = basename( $frame['file'] ) . ':' . ( isset( $frame['line'] ) ? $frame['line'] : '?' );
+				break;
+			}
+		}
+
+		$qahm_log->warning( 'wrap_unserialize: disallowed classes in serialized data (not instantiated): ' . implode( ', ', $names ) . ' / caller: ' . $caller );
+	}
+
+	/**
+	 * 破損したシリアライズデータを修復して読む（pcre.backtrack_limit を一時的に上げる）
+	 *
+	 * 上げた値は、途中で抜けた場合も含めて、呼ぶ前の値に必ず戻す。
+	 * ini_restore() は php.ini の値に戻す（他の処理が先に変えた値まで消す）ので使わない。
+	 *
+	 * @param string $data シリアライズされたデータ.
+	 * @return mixed デシリアライズされたデータ（失敗時は false）.
+	 */
+	private static function unserialize_with_repair( $data ) {
+		$backtrack_limit = ini_get( 'pcre.backtrack_limit' );
+		$raised          = ( false !== $backtrack_limit && (int) $backtrack_limit < 5000000 );
+		if ( $raised ) {
+			// phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Temporarily raises the PCRE backtrack limit while repairing broken data; restored in finally.
+			ini_set( 'pcre.backtrack_limit', 5000000 );
+		}
+
+		try {
+			return self::repair_broken_serialized( $data );
+		} finally {
+			if ( $raised ) {
+				// phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Restores the PCRE backtrack limit raised above.
+				ini_set( 'pcre.backtrack_limit', $backtrack_limit );
+			}
+		}
+	}
+
+	/**
+	 * 破損したシリアライズデータの修復処理（既存ロジックを維持）
+	 *
+	 * 文字列の長さのずれなどを直して、unserialize を最大6回試す。
+	 * 最初の置換結果（$fixed_data）を、後の試行でも元にする。
+	 *
+	 * @param string $data シリアライズされたデータ.
+	 * @return mixed デシリアライズされたデータ（失敗時は false）.
+	 */
+	private static function repair_broken_serialized( $data ) {
 		$pattern = '/(;s:[0-9]+:")([\s\S]+?)("[N];s:[0-9]+:)/';
 
 		$fixed_data = preg_replace_callback(
@@ -841,7 +941,7 @@ abstract class QAHM_Core_Base {
 			},
 			$fixed_data
 		);
-		$arr       = @unserialize( $str_fixed ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr       = self::unserialize_stdclass_only( $str_fixed );
 		if ( false !== $arr ) {
 			return $arr;
 		}
@@ -853,7 +953,7 @@ abstract class QAHM_Core_Base {
 			},
 			$fixed_data
 		);
-		$arr       = @unserialize( $str_fixed ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr       = self::unserialize_stdclass_only( $str_fixed );
 		if ( false !== $arr ) {
 			return $arr;
 		}
@@ -874,7 +974,7 @@ abstract class QAHM_Core_Base {
 			);
 		}
 		$str_fixed = $new_data;
-		$arr       = @unserialize( $str_fixed ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr       = self::unserialize_stdclass_only( $str_fixed );
 		if ( false !== $arr ) {
 			return $arr;
 		}
@@ -886,7 +986,7 @@ abstract class QAHM_Core_Base {
 			},
 			$fixed_data
 		);
-		$arr       = @unserialize( $str_fixed ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr       = self::unserialize_stdclass_only( $str_fixed );
 		if ( false !== $arr ) {
 			return $arr;
 		}
@@ -898,7 +998,7 @@ abstract class QAHM_Core_Base {
 			},
 			$fixed_data
 		);
-		$arr       = @unserialize( $str_fixed ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr       = self::unserialize_stdclass_only( $str_fixed );
 		if ( false !== $arr ) {
 			return $arr;
 		}
@@ -910,7 +1010,7 @@ abstract class QAHM_Core_Base {
 			},
 			$fixed_data
 		);
-		$arr       = @unserialize( $str_fixed ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$arr       = self::unserialize_stdclass_only( $str_fixed );
 		if ( false !== $arr ) {
 			return $arr;
 		}

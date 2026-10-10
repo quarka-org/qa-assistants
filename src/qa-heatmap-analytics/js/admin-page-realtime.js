@@ -195,6 +195,7 @@ qahm.openReplayView = function() {
 				dataType : 'text',
 				data: {
 					'action'        : 'qahm_ajax_create_replay_file_to_raw_data',
+					'nonce'         : qahm.nonce_api,
 					'work_base_name': jQuery( this ).data( 'work_base_name' ),
 					'replay_id'     : 1,
 				},
@@ -325,6 +326,7 @@ qahm.updateSessionNum = function() {
 			data: {
 				'action' : 'qahm_ajax_get_session_num',
 				'tracking_id' : qahm.tracking_id,
+				'nonce' : qahm.nonce_api,
 			},
 		}
 	).done(
@@ -377,6 +379,7 @@ qahm.updateRealtimeList = function() {
 			data: {
 				'action' : 'qahm_ajax_get_realtime_list',
 				'tracking_id' : qahm.tracking_id,
+				'nonce' : qahm.nonce_api,
 			},
 		}
 	).done(

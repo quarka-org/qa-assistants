@@ -535,6 +535,7 @@ qahm.replayClickEvent = function() {
 				dataType : 'json',
 				data: {
 					'action':      'qahm_ajax_create_replay_file_to_data_base',
+					'nonce':       qahm.nonce_api,
 					'reader_id':   reader_id,
 					'replay_id':   replay_id,
 					'access_time': access_time,

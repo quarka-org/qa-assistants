@@ -34,6 +34,11 @@ class QAHM_Assistant_Manager extends QAHM_File_Data {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		// 権限の確認（nonce は CSRF 対策であって認可ではない）
+		if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+			return;
+		}
 		// Retrieve the assistantSlug from the POST data
 		$assistant_slug = $this->wrap_filter_input( INPUT_POST, 'assistant_slug' );
 		$response       = $this->get_assistant( $assistant_slug );
@@ -45,6 +50,13 @@ class QAHM_Assistant_Manager extends QAHM_File_Data {
 	 * AJAX: Connect assistant — proxy to LegacyHandler
 	 */
 	public function ajax_connect_assistant() {
+		// 権限の確認（nonce は CSRF 対策であって認可ではない）。
+		// LegacyHandler は凍結済みで変更しないため、委譲前のここで確認する。
+		// そのため他のハンドラーと違い、nonce の確認より先に行われる（どちらでも拒否されることは同じ）。
+		if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+			return;
+		}
 		global $qahm_assistant_legacy_handler;
 		$qahm_assistant_legacy_handler->ajax_connect_assistant();
 	}

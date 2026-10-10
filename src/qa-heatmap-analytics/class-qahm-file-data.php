@@ -138,4 +138,114 @@ class QAHM_File_Data extends QAHM_File_Base {
 		'STAY_NUM'    => 2,       // 高さを百で割った位置に滞在した読者の数
 		'EXIT_NUM'    => 3,       // この地点で離脱した読者の数
 	);
+
+	/**
+	 * 読者セッションファイル名（readers_name）の形式を検証する。#1642
+	 *
+	 * 形式は {qa_id}_{Y-m-d}_{セッション番号}（init_session_data() が生成して計測タグへ返す名前）。
+	 * 計測タグから送り返された値をそのままファイルパスに使うため、形式に合わない名前は通さない。
+	 * 既存の規約に合わせて preg_match は使わず、explode / ctype / strlen で判定する。
+	 *
+	 * @param mixed $name 検証する名前（拡張子なし）。
+	 * @return bool 形式に合えば true。
+	 */
+	public function is_valid_readers_name( $name ) {
+		if ( ! is_string( $name ) ) {
+			return false;
+		}
+
+		$parts = explode( '_', $name );
+		if ( count( $parts ) !== 3 ) {
+			return false;
+		}
+
+		return $this->is_valid_qa_id( $parts[0] )
+			&& $this->is_valid_ymd_str( $parts[1] )
+			&& $this->is_valid_digits( $parts[2], 9 );
+	}
+
+	/**
+	 * 生データファイル名（raw_name）の形式を検証する。#1642
+	 *
+	 * 形式は {qa_id}_{unixtime}（init_session_data() が生成して計測タグへ返す名前）。
+	 * ここに -p / -c / -e / -g と拡張子が付いて保存される。
+	 *
+	 * @param mixed $name 検証する名前（接尾辞・拡張子なし）。
+	 * @return bool 形式に合えば true。
+	 */
+	public function is_valid_raw_name( $name ) {
+		if ( ! is_string( $name ) ) {
+			return false;
+		}
+
+		$parts = explode( '_', $name );
+		if ( count( $parts ) !== 2 ) {
+			return false;
+		}
+
+		return $this->is_valid_qa_id( $parts[0] )
+			&& $this->is_valid_digits( $parts[1], 10 );
+	}
+
+	/**
+	 * readers/temp 内のファイル名が、計測エンドポイントの作る形式（{readers_name}.php）かを検証する。#1642
+	 *
+	 * 同じディレクトリにはヘルスチェックの一時ファイルなど別用途のファイルも置かれるため、
+	 * 形式に合わないファイルは読み込み対象から外す目的で使う。
+	 *
+	 * @param mixed $file_name ファイル名。
+	 * @return bool 形式に合えば true。
+	 */
+	public function is_valid_readers_file_name( $file_name ) {
+		if ( ! is_string( $file_name ) || substr( $file_name, -4 ) !== '.php' ) {
+			return false;
+		}
+
+		return $this->is_valid_readers_name( substr( $file_name, 0, -4 ) );
+	}
+
+	/**
+	 * qa_id の形式（28桁の英数字）を検証する。
+	 *
+	 * qahm-ajax.php の Cookie（qa_id_z）検証と同じ条件。
+	 *
+	 * @param string $qa_id 検証する qa_id。
+	 * @return bool 形式に合えば true。
+	 */
+	private function is_valid_qa_id( $qa_id ) {
+		return strlen( $qa_id ) === 28 && ctype_alnum( $qa_id );
+	}
+
+	/**
+	 * Y-m-d 形式の実在する日付かを検証する。
+	 *
+	 * @param string $ymd 検証する日付文字列。
+	 * @return bool 形式に合い、実在する日付なら true。
+	 */
+	private function is_valid_ymd_str( $ymd ) {
+		if ( strlen( $ymd ) !== 10 || $ymd[4] !== '-' || $ymd[7] !== '-' ) {
+			return false;
+		}
+
+		$year  = substr( $ymd, 0, 4 );
+		$month = substr( $ymd, 5, 2 );
+		$day   = substr( $ymd, 8, 2 );
+		if ( ! ctype_digit( $year ) || ! ctype_digit( $month ) || ! ctype_digit( $day ) ) {
+			return false;
+		}
+
+		return checkdate( (int) $month, (int) $day, (int) $year );
+	}
+
+	/**
+	 * 1 文字以上 $max_len 文字以下の数字だけの文字列かを検証する。
+	 *
+	 * @param string $str     検証する文字列。
+	 * @param int    $max_len 許容する最大桁数。
+	 * @return bool 条件に合えば true。
+	 */
+	private function is_valid_digits( $str, $max_len ) {
+		$len = strlen( $str );
+		return $len >= 1 && $len <= $max_len && ctype_digit( $str );
+	}
 }

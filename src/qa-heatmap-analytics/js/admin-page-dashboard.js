@@ -139,6 +139,7 @@ jQuery(
                     dataType : 'json',
                     data: {
                         'action' : 'qahm_ajax_get_two_mon_sessions',
+                        'nonce' : qahm.nonce_api,
                         'tracking_id' : qahm.tracking_id
                     }
                 }

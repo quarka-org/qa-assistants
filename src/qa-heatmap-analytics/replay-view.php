@@ -20,14 +20,24 @@ try {
 		require_once '../../../wp-settings.php';
 	}
 
+	global $qahm_time;
+	global $wp_filesystem;
+	global $qahm_view_replay;
+
+	// ログイン判定
+	// #1643: 作業ファイルの読み込みより前に確認する
+	if ( ! $qahm_view_replay->check_access_role( 'qahm_analytics' ) ) {
+		throw new Exception( 'You do not have access privileges.' );
+	}
+
 	// GETパラメーター判定
 	if ( ! $work_base_name || ! $replay_id ) {
 		throw new Exception( 'Query string has no value.' );
 	}
-
-	global $qahm_time;
-	global $wp_filesystem;
-	global $qahm_view_replay;
+	// #1643: 作業ファイル名に入る値は、作る側（生データ経由＝readers ファイル名、DB 経由＝pv_id）の形式だけを受け付ける
+	if ( ! $qahm_view_replay->is_valid_replay_work_base_name( $work_base_name ) || $replay_id < 1 ) {
+		throw new Exception( 'The URL parameters are invalid.' );
+	}
 	$replay_view_work_dir = $qahm_view_replay->get_data_dir_path( 'replay-view-work' );
 	$replay_view_work_url = $qahm_view_replay->get_work_dir_url();
 
@@ -38,16 +48,13 @@ try {
 	$info_path = $replay_view_work_dir . $work_base_name . '_' . $replay_id . '-info.php';
 	$info_ary  = $qahm_view_replay->get_contents_info( $info_path );
 
-	// ログイン判定
-	if ( ! $qahm_view_replay->check_access_role( 'qahm_analytics' ) ) {
-		throw new Exception( 'You do not have access privileges.' );
-	}
-
 	// 翻訳ファイルの読み込みはここでしなくてもプラグイン全体で読み込まれている
 	//load_plugin_textdomain( 'qa-heatmap-analytics', false, plugin_basename( dirname( __FILE__ ) ) . '/languages' );
 
 	// パラメータ設定
 	$ajax_url       = admin_url( 'admin-ajax.php' );
+	// #1643: 画面から呼ぶ admin-ajax（ページ移行・OGP 取得）が nonce を送るために出力する
+	$nonce_api      = wp_create_nonce( QAHM_Data_Api::NONCE_API );
 	$plugin_version = QAHM_PLUGIN_VERSION;
 	$debug_level    = wp_json_encode( QAHM_DEBUG_LEVEL );
 	$debug          = QAHM_DEBUG;
@@ -376,6 +383,7 @@ try {
 		<script>
 			var qahm = {
 				'ajax_url':'<?php echo esc_js( esc_url( $ajax_url ) ); ?>',
+				'nonce_api':'<?php echo esc_js( $nonce_api ); ?>',
 				'data_type':'<?php echo esc_js( $info_ary['data_type'] ); ?>',
 				'debug_level':<?php echo intval( $debug_level ); ?>,
 				'debug':<?php echo intval( $debug ); ?>,

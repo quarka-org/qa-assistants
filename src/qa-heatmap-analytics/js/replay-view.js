@@ -587,6 +587,7 @@ qahm.openReplayView = function( replayId ) {
 					dataType : 'text',
 					data: {
 						'action'        : 'qahm_ajax_create_replay_file_to_raw_data',
+						'nonce'         : qahm.nonce_api,
 						'work_base_name': qahm.work_base_name,
 						'replay_id'     : replayId,
 					},
@@ -616,6 +617,7 @@ qahm.openReplayView = function( replayId ) {
 					dataType : 'json',
 					data: {
 						'action'        : 'qahm_ajax_create_replay_file_to_data_base',
+						'nonce'         : qahm.nonce_api,
 						'work_base_name': qahm.work_base_name,
 						'replay_id'     : replayId,
 						'reader_id'     : qahm.reader_id,
@@ -826,6 +828,7 @@ qahm.loadOgpImages = function() {
 			dataType: 'json',
 			data: {
 				'action': 'qahm_ajax_get_ogp_image',
+				'nonce': qahm.nonce_api,
 				'url': pageUrl
 			}
 		}).done(function(response) {

@@ -159,6 +159,7 @@ qahm.loadScreen.promise()
 					dataType : 'json',
 					data: {
 						'action' : 'qahm_ajax_create_heatmap_file',
+						'nonce': qahm.nonce_api,
 						'tracking_id': tracking_id,
 						'start_date': startDate,
 						'end_date': endDate,

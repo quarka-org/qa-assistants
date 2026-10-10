@@ -616,6 +616,10 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 
 							// PV上限超過時はrawファイル & セッションファイルの削除
 							foreach ( $session_files as $session_file ) {
+								// #1642: 計測エンドポイントが作る形式以外のファイル（ヘルスチェックの一時ファイル等）は読まない・消さない
+								if ( ! $this->is_valid_readers_file_name( $session_file['name'] ) ) {
+									continue;
+								}
 								$elapsed_sec = $now_unixtime - $session_file['lastmodunix'];
 
 								// 作成されてから30分以上たってたら削除
@@ -730,6 +734,10 @@ class QAHM_Cron_Proc extends QAHM_File_Data {
 						$realtime_view_recent_ary = array();
 
 						foreach ( $session_files as $session_file ) {
+							// #1642: 計測エンドポイントが作る形式以外のファイル（ヘルスチェックの一時ファイル等）は読まない・消さない
+							if ( ! $this->is_valid_readers_file_name( $session_file['name'] ) ) {
+								continue;
+							}
 							$elapsed_sec = $now_unixtime - $session_file['lastmodunix'];
 
 							// 作成されてから30分以上たってたらfinishへ

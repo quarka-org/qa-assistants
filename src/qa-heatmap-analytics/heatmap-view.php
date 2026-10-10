@@ -28,6 +28,12 @@ try {
 		require_once '../../../wp-settings.php';
 	}
 
+	// ログイン判定
+	// #1643: DB の読み取りや作業ファイルの読み込み・生成より前に確認する
+	if ( ! $qahm_view_heatmap->check_access_role( 'qahm_analytics' ) ) {
+		throw new Exception( 'You do not have access privileges.' );
+	}
+
 	$page_id                = null;
 	$page_url_for_live_view = '';
 	if ( $version_id ) {
@@ -52,6 +58,11 @@ try {
 	// GETパラメーター判定
 	if ( ! $version_id || ! $start_date || ! $end_date || ! $tracking_id ) {
 		throw new Exception( 'The required URL parameters are missing.' );
+	}
+	// #1643: 作業ファイル名に入る値は、画面が作る形式だけを受け付ける（is_landing_page は上で int にしている）
+	if ( ! $qahm_view_heatmap->is_valid_heatmap_datetime( $start_date ) || ! $qahm_view_heatmap->is_valid_heatmap_datetime( $end_date ) ||
+		! $qahm_view_heatmap->is_valid_heatmap_tracking_id( $tracking_id ) || ! $qahm_view_heatmap->is_valid_heatmap_landing_flag( $is_landing_page ) ) {
+		throw new Exception( 'The URL parameters are invalid.' );
 	}
 	$file_base_name = $version_id . '_' . preg_replace( '/[\s:-]+/', '', $start_date ) . '_' . preg_replace( '/[\s:-]+/', '', $end_date ) . '_' . $is_landing_page . '_' . $tracking_id;
 
@@ -151,12 +162,6 @@ try {
 	if ( $source || $media || $campaign || $goal ) {
 		$data_num     = '--';
 		$time_on_page = '--:--';
-	}
-
-
-	// ログイン判定
-	if ( ! $qahm_view_heatmap->check_access_role( 'qahm_analytics' ) ) {
-		throw new Exception( 'You do not have access privileges.' );
 	}
 
 	// 翻訳ファイルの読み込みはここでしなくてもプラグイン全体で読み込まれている
@@ -388,7 +393,7 @@ try {
 		<script>
 			var qahm = qahm || {};
 			let qahmObj = {
-				'nonce_api':'<?php echo wp_json_encode( $nonce_api ); ?>',
+				'nonce_api':'<?php echo esc_js( $nonce_api ); ?>',
 				'ajax_url':'<?php echo esc_js( esc_url( $ajax_url ) ); ?>',
 				'wp_lang_set':'<?php echo esc_js( get_bloginfo( 'language' ) ); ?>',
 				'type':'<?php echo esc_js( $wp_qa_type ); ?>',

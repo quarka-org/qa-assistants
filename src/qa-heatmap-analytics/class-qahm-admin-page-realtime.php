@@ -180,11 +180,38 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 	}
 
 	/**
+	 * リアルタイムの admin-ajax で、nonce と権限をまとめて確認する。#1643
+	 *
+	 * 応答は出力しない。失敗したときの返し方は各ハンドラが決める。
+	 * ※ QAHM_View_Base::verify_ajax_request() / QAHM_Admin_Page_Dashboard::verify_ajax_request() と同じ処理。
+	 *   直すときは3か所とも直す。
+	 *   QAHM_Base に置かないのは、ほぼ全クラスと別配布のアシスタントに受け継がれるため。
+	 *
+	 * @param string $nonce_action nonce の action。
+	 * @param string $nonce_field  nonce を受け取る POST の項目名。
+	 * @return bool nonce が正しく、閲覧権限があれば true。
+	 */
+	private function verify_ajax_request( $nonce_action = QAHM_Data_Api::NONCE_API, $nonce_field = 'nonce' ) {
+		$nonce = $this->wrap_filter_input( INPUT_POST, $nonce_field );
+		if ( ! is_string( $nonce ) || ! wp_verify_nonce( $nonce, $nonce_action ) ) {
+			return false;
+		}
+
+		return $this->check_access_role( 'qahm_analytics' );
+	}
+
+	/**
 	 * セッション数の取得
 	 */
 	public function ajax_get_session_num() {
 		if ( $this->is_maintenance() ) {
 			return;
+		}
+
+		// #1643: メンテナンス中の動き（空の応答）は変えないよう、確認はメンテナンスの判定の後に置く。
+		// 呼び出し元（admin-page-realtime.js）は失敗時の処理を持つので 403 で返す
+		if ( ! $this->verify_ajax_request() ) {
+			wp_die( '', '', array( 'response' => 403 ) );
 		}
 
 		$data             = array();
@@ -204,6 +231,11 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 			$session_temp_dirlist = $this->wrap_dirlist( $session_temp_dir_path );
 			if ( $session_temp_dirlist ) {
 				foreach ( $session_temp_dirlist as $session_temp_fileobj ) {
+					// #1642: 計測エンドポイントが作る形式以外のファイル（ヘルスチェックの一時ファイル等）は読まず、数えない
+					if ( ! $this->is_valid_readers_file_name( $session_temp_fileobj['name'] ) ) {
+						continue;
+					}
+
 					// tracking_id でフィルタリング
 					if ( $tracking_id !== 'all' ) {
 						$temp_file_path = $session_temp_dir_path . '/' . $session_temp_fileobj['name'];
@@ -241,6 +273,11 @@ class QAHM_Admin_Page_Realtime extends QAHM_Admin_Page_Dataviewer {
 	public function ajax_get_realtime_list() {
 		if ( $this->is_maintenance() ) {
 			return;
+		}
+
+		// #1643: ajax_get_session_num() と同じ
+		if ( ! $this->verify_ajax_request() ) {
+			wp_die( '', '', array( 'response' => 403 ) );
 		}
 
 		$data          = array();

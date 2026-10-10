@@ -68,13 +68,14 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$table       = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'table' ) );
 		$column      = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'select' ) );
 		$date_or_id  = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date_or_id' ) ) );
 		$count       = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'count' ) );
 		$where       = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'where' ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) ); // zero add
+		$tracking_id = $this->get_ajax_tracking_id(); // zero add / #1643: 登録済みか 'all' だけ
 
 		if ( $count === 'true' || $count == 1 ) {
 			$count = true;
@@ -89,13 +90,14 @@ class QAHM_Data_Api extends QAHM_Db {
 		die();
 	}
 	public function ajax_get_pvterm_start_date() {
-		$nonce       = $this->wrap_filter_input( INPUT_POST, 'nonce' );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) ); // zero add
+		$nonce = $this->wrap_filter_input( INPUT_POST, 'nonce' );
 		if ( ! wp_verify_nonce( $nonce, self::NONCE_API ) || $this->is_maintenance() ) {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
-		$res = $this->get_pvterm_start_date( $tracking_id );
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
+		$tracking_id = $this->get_ajax_tracking_id(); // zero add / #1643: 登録済みか 'all' だけ
+		$res         = $this->get_pvterm_start_date( $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
 		echo $this->wrap_json_encode( $res );
@@ -113,13 +115,14 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_settings' ); // #1643: 設定を書き換えるので Settings 画面と同じ権限
 		$target_customer = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'target_customer' ) );
 		$sitetype        = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'sitetype' ) );
 		$membership      = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'membership' ) );
 		$payment         = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'payment' ) );
 		$month_later     = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'month_later' ) );
 		$session_goal    = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'session_goal' ) );
-		$tracking_id     = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id     = $this->get_ajax_tracking_id( true ); // #1643: 登録済みだけ（'all' には書かせない）
 
 		// #1153: 目標日（Nか月後）は暦日なので計測サイトTZで算出。
 		$clock          = QAHM_Time::get_site_clock( $tracking_id );
@@ -185,6 +188,8 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		// #1643: 呼び出し元は Settings 画面（ゴール設定）だけ。ページの HTML をサーバーから取得することがあるので設定権限
+		$this->require_ajax_access_role( 'qahm_settings' );
 		$pageurl   = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'pageurl' ) );
 		$device_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'device_id' ) );
 		if ( $this->wrap_filter_input( INPUT_POST, 'add_basehref' ) !== null ) {
@@ -632,9 +637,11 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_settings' ); // #1643: 設定を書き換えるので Settings 画面と同じ権限
 
-		$gid         = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'gid' ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		// #1643: gid と tracking_id はゴールのファイル名・保存先に入るので、形式と登録済みかを確かめる
+		$gid         = $this->get_ajax_goal_id();
+		$tracking_id = $this->get_ajax_tracking_id( true );
 
 		$params = array(
 			'gtitle'          => $this->wrap_filter_input( INPUT_POST, 'gtitle' ),
@@ -747,13 +754,12 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
-		$gid         = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'gid' ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
-		if ( is_numeric( $gid ) ) {
-			$stat = $this->delete_goal_x( $tracking_id, (int) $gid );
-		} else {
-			$stat = false;
-		}
+		$this->require_ajax_access_role( 'qahm_settings' ); // #1643: 設定を書き換えるので Settings 画面と同じ権限
+
+		// #1643: 以前は is_numeric() → (int) で、'1e1' や '-1' も通していた。保存と同じ検証にそろえる
+		$gid         = $this->get_ajax_goal_id();
+		$tracking_id = $this->get_ajax_tracking_id( true );
+		$stat        = $this->delete_goal_x( $tracking_id, $gid );
 		if ( $stat ) {
 			header( 'Content-type: application/json; charset=UTF-8' );
 			echo( '{"save":"success"}' );
@@ -844,9 +850,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		$resary      = $this->get_recent_sessions( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
@@ -860,9 +867,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		$resary      = $this->get_goals_sessions( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
@@ -2829,6 +2837,7 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 
 		$url          = $this->wrap_filter_input( INPUT_POST, 'url' );
 		$prefix_match = $this->wrap_filter_input( INPUT_POST, 'prefix' );
@@ -2898,9 +2907,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		//$resary = $this->get_nrd_data( $dateterm, $tracking_id );
 		$resary = $this->get_nrd_data_by_sub_summary( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
@@ -3124,9 +3134,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		//$resary = $this->get_ch_data( $dateterm, $tracking_id );
 		$resary = $this->get_ch_data_by_sub_summary( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
@@ -3489,10 +3500,11 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
 		$name_ary    = json_decode( $this->wrap_filter_input( INPUT_POST, 'name_ary' ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 
 		if ( ! $dateterm || ! $name_ary || ! $tracking_id ) {
 			http_response_code( 408 );
@@ -3630,9 +3642,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		//$resary = $this->get_sm_data( $dateterm, $tracking_id );
 		$resary = $this->get_sm_data_by_sub_summary( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
@@ -3818,10 +3831,11 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
 		$name_ary    = json_decode( $this->wrap_filter_input( INPUT_POST, 'name_ary' ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 
 		if ( ! $dateterm || ! $name_ary || ! $tracking_id ) {
 			http_response_code( 408 );
@@ -3914,9 +3928,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		$resary      = $this->get_lp_data( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
@@ -4352,9 +4367,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		$resary      = $this->get_gw_data( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
@@ -4413,9 +4429,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 406 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 		// 全パラメーターを取得する
 		$dateterm    = mb_strtolower( $this->wrap_trim( $this->wrap_filter_input( INPUT_POST, 'date' ) ) );
-		$tracking_id = $this->alltrim( $this->wrap_filter_input( INPUT_POST, 'tracking_id' ) );
+		$tracking_id = $this->get_ajax_tracking_id(); // #1643: 登録済みか 'all' だけ
 		$resary      = $this->get_ap_data( $dateterm, $tracking_id );
 		header( 'Content-type: application/json; charset=UTF-8' );
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
@@ -5132,6 +5149,7 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 
 		$data_dir = $this->get_data_dir_path();
 		$cachedir = $data_dir . 'cache/';
@@ -5195,6 +5213,82 @@ class QAHM_Data_Api extends QAHM_Db {
 	 */
 	private function alltrim( $string ) {
 		return str_replace( ' ', '', $string );
+	}
+
+	/**
+	 * admin-ajax の権限を確認し、無ければ 403 で止める。#1643
+	 *
+	 * 各ハンドラ冒頭の nonce の確認（とその失敗時の応答）はそのまま残し、その後ろで呼ぶ。
+	 * nonce はどの QA 画面でも配られるため、nonce だけでは画面ごとの権限の区別にならない。
+	 * - 設定を書き換えるハンドラ：'qahm_settings'（Settings 画面と同じ）
+	 * - 読むだけのハンドラ：'qahm_analytics'
+	 * check_access_role() は manage_options を持つ人を常に通すので、専用の権限を持つロールが無い
+	 * QA Assistants では、どちらを指定しても管理者だけが通る。
+	 *
+	 * @param string $cap 求める capability。
+	 */
+	private function require_ajax_access_role( $cap ) {
+		if ( ! $this->check_access_role( $cap ) ) {
+			http_response_code( 403 );
+			die( 'permission error' );
+		}
+	}
+
+	/**
+	 * admin-ajax で送られた tracking_id を検証して返す。形式に合わなければ 400 で止める。#1643
+	 *
+	 * tracking_id はデータの読み込み先・書き込み先のディレクトリ名に入るため、登録済みの値だけを受け付ける。
+	 * validate_tracking_id() は empty() が true になる値（'0' など）を有効として通し、
+	 * get_safe_tracking_id() は不正な値を 'all' に置き換えて処理を続けるため、どちらも使わない。
+	 * - 読むだけ（$for_write = false）：登録済みか 'all'。未送信・空は 'all' として扱う
+	 *   （各処理の既定値が 'all'。Audience の CSV は URL に tracking_id が無いと空で送る）
+	 * - 書き込み（$for_write = true）：登録済みだけ。'all'（全サイト分のデータの置き場）には書かせない。
+	 *   Settings 画面は 'all' のときフォームを出さないので、画面からは登録済みの値だけが送られる
+	 *
+	 * @param bool $for_write 書き込みのハンドラなら true。
+	 * @return string 検証済みの tracking_id。
+	 */
+	private function get_ajax_tracking_id( $for_write = false ) {
+		$tracking_id = $this->wrap_filter_input( INPUT_POST, 'tracking_id' );
+
+		if ( ! $for_write && ( null === $tracking_id || '' === $tracking_id ) ) {
+			return 'all';
+		}
+
+		if ( is_string( $tracking_id ) ) {
+			if ( ! $for_write && 'all' === $tracking_id ) {
+				return $tracking_id;
+			}
+			if ( in_array( $tracking_id, (array) $this->get_valid_tracking_ids_with_cache(), true ) ) {
+				return $tracking_id;
+			}
+		}
+
+		http_response_code( 400 );
+		die( 'parameter error' );
+	}
+
+	/**
+	 * admin-ajax で送られたゴール番号（gid）を検証して返す。形式に合わなければ 400 で止める。#1643
+	 *
+	 * gid はゴールのファイル名（goal_{gid}_file_making.log、{ym}-01_goal_{gid}_1mon.php）に入る。
+	 * Settings 画面は 1〜QAHM_CONFIG_GOALMAX の整数だけを送る。範囲はアシスタント経由のゴール保存
+	 * （QAHM_Assistant_Runtime_Handler）と同じ。
+	 *
+	 * @return int 検証済みのゴール番号。
+	 */
+	private function get_ajax_goal_id() {
+		$gid = $this->wrap_filter_input( INPUT_POST, 'gid' );
+
+		if ( is_string( $gid ) && ctype_digit( $gid ) && strlen( $gid ) <= 3 ) {
+			$gid = (int) $gid;
+			if ( 1 <= $gid && $gid <= QAHM_CONFIG_GOALMAX ) {
+				return $gid;
+			}
+		}
+
+		http_response_code( 400 );
+		die( 'parameter error' );
 	}
 
 	/**
@@ -5334,11 +5428,14 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		// #1643: レポート生成のキューに積む（書き込み）ので設定権限。呼び出し元の画面は今は無い
+		$this->require_ajax_access_role( 'qahm_settings' );
 
 		$button_type = isset( $_POST['button_type'] ) ? sanitize_text_field( wp_unslash( $_POST['button_type'] ) ) : '';
 		$start_date  = isset( $_POST['start_date'] ) ? sanitize_text_field( wp_unslash( $_POST['start_date'] ) ) : '';
 		$end_date    = isset( $_POST['end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['end_date'] ) ) : '';
-		$tracking_id = isset( $_POST['tracking_id'] ) ? $this->get_safe_tracking_id( sanitize_text_field( wp_unslash( $_POST['tracking_id'] ) ) ) : 'all';
+		// #1643: 不正な値を 'all' に置き換えて続けず、止める。未送信は従来どおり 'all'
+		$tracking_id = $this->get_ajax_tracking_id();
 
 		$response = $this->generate_ai_report( $button_type, $start_date, $end_date, $tracking_id );
 		wp_send_json( $response );
@@ -5537,8 +5634,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 
-		$tracking_id = isset( $_POST['tracking_id'] ) ? $this->get_safe_tracking_id( sanitize_text_field( wp_unslash( $_POST['tracking_id'] ) ) ) : 'all';
+		// #1643: 不正な値を 'all' に置き換えて続けず、止める。未送信は従来どおり 'all'
+		$tracking_id = $this->get_ajax_tracking_id();
 
 		$response = $this->get_processing_queues( $tracking_id );
 		wp_send_json( $response );
@@ -5566,8 +5665,10 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_analytics' ); // #1643
 
-		$tracking_id = isset( $_POST['tracking_id'] ) ? $this->get_safe_tracking_id( sanitize_text_field( wp_unslash( $_POST['tracking_id'] ) ) ) : 'all';
+		// #1643: 不正な値を 'all' に置き換えて続けず、止める（読み込み先 report/{tracking_id}/ に入る）。未送信は従来どおり 'all'
+		$tracking_id = $this->get_ajax_tracking_id();
 
 		$response = $this->get_completed_queues( $tracking_id );
 		wp_send_json( $response );
@@ -5620,6 +5721,7 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_settings' ); // #1643: 書き込み系（今は中身の無い処理）。呼び出し元の画面は今は無い
 
 		$queue_id = isset( $_POST['queue_id'] ) ? sanitize_text_field( wp_unslash( $_POST['queue_id'] ) ) : '';
 
@@ -5654,6 +5756,7 @@ class QAHM_Data_Api extends QAHM_Db {
 			http_response_code( 400 );
 			die( 'nonce error' );
 		}
+		$this->require_ajax_access_role( 'qahm_settings' ); // #1643: 書き込み系（今は中身の無い処理）。呼び出し元の画面は今は無い
 
 		$queue_ids = isset( $_POST['queue_ids'] ) && is_array( $_POST['queue_ids'] )
 			? array_map( 'sanitize_text_field', wp_unslash( $_POST['queue_ids'] ) )

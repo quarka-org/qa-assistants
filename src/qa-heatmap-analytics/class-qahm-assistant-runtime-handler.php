@@ -46,6 +46,12 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 			die( 'nonce error' );
 		}
 
+		// 権限の確認（nonce は CSRF 対策であって認可ではない）
+		if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+			return;
+		}
+
 		$slug = sanitize_text_field( $this->wrap_filter_input( INPUT_POST, 'slug' ) );
 		if ( empty( $slug ) ) {
 			wp_send_json_error( array( 'message' => 'Missing slug parameter.' ) );
@@ -206,6 +212,12 @@ class QAHM_Assistant_Runtime_Handler extends QAHM_File_Data {
 		if ( ! wp_verify_nonce( $nonce, self::NONCE_API ) ) {
 			http_response_code( 400 );
 			die( 'nonce error' );
+		}
+
+		// 権限の確認（nonce は CSRF 対策であって認可ではない）
+		if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ) );
+			return;
 		}
 
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized

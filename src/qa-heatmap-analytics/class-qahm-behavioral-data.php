@@ -421,12 +421,47 @@ class QAHM_Behavioral_Data extends QAHM_File_Data {
 	}
 
 	public function update_msec( $readers_name, $readers_body_index, $speed_msec ) {
-			$readers_temp_dir = $this->get_data_dir_path( 'readers/temp/' );
-			$readers_data_ary = $this->wrap_unserialize( $this->wrap_get_contents( $readers_temp_dir . $readers_name . '.php' ) );
-			if ( isset( $readers_data_ary['body'][$readers_body_index]['page_speed'] ) ) {
-				$readers_data_ary['body'][$readers_body_index]['page_speed'] = $speed_msec;
-				$this->wrap_put_contents( $readers_temp_dir . $readers_name . '.php', $this->wrap_serialize( $readers_data_ary ) );
+			// #1642: 入口（qahm-ajax.php）でも検証しているが、パスに使う直前にも形式と保存先を確認する
+			if ( ! $this->is_valid_readers_name( $readers_name ) ) {
+				return;
 			}
+			$readers_temp_path = $this->build_data_file_path( $this->get_data_dir_path( 'readers/temp/' ), $readers_name . '.php' );
+			if ( ! $readers_temp_path ) {
+				return;
+			}
+
+			$readers_data_ary = $this->wrap_unserialize( $this->wrap_get_contents( $readers_temp_path ) );
+			// #1642: 読み込み結果が配列でなければ書き戻さない
+			if ( is_array( $readers_data_ary ) && isset( $readers_data_ary['body'][$readers_body_index]['page_speed'] ) ) {
+				$readers_data_ary['body'][$readers_body_index]['page_speed'] = $speed_msec;
+				$this->wrap_put_contents( $readers_temp_path, $this->wrap_serialize( $readers_data_ary ) );
+			}
+	}
+
+	/**
+	 * ディレクトリとファイル名から保存先パスを組み立て、ディレクトリの直下に収まるかを確認する。#1642
+	 *
+	 * ファイル名は計測タグから送られた値に由来するため、名前の形式検証に重ねて保存先そのものを確認する。
+	 * データディレクトリをシンボリックリンクで配置している環境でも誤判定しないよう、
+	 * 基準ディレクトリと保存先の親ディレクトリを両方とも realpath で正規化して比べる。
+	 * ※ QAHM_View_Base::build_data_file_path()（#1643）と同じ処理。直すときは両方直す。
+	 *
+	 * @param string $dir       基準ディレクトリ（末尾スラッシュ付き）。
+	 * @param string $file_name ファイル名。
+	 * @return string|false 直下に収まればパス、収まらなければ false。
+	 */
+	private function build_data_file_path( $dir, $file_name ) {
+		$path     = $dir . $file_name;
+		$real_dir = realpath( $dir );
+		if ( false === $real_dir ) {
+			return false;
+		}
+
+		if ( realpath( dirname( $path ) ) !== $real_dir || basename( $path ) !== $file_name ) {
+			return false;
+		}
+
+		return $path;
 	}
 
 	// 指定したQA IDを持つひとにとって、最新のreadersファイルを取得
@@ -445,6 +480,11 @@ class QAHM_Behavioral_Data extends QAHM_File_Data {
 		if ( $file_list ) {
 			foreach ( $file_list as $file ) {
 				if ( $this->wrap_strpos( $file['name'], $qa_id . '_' ) === false ) {
+					continue;
+				}
+
+				// #1642: 見つけた日付・番号で readers_name を組み立てて読み込むため、形式に合わないファイルは対象にしない
+				if ( ! $this->is_valid_readers_file_name( $file['name'] ) ) {
 					continue;
 				}
 
@@ -526,7 +566,14 @@ class QAHM_Behavioral_Data extends QAHM_File_Data {
 			$dev_name       = $this->user_agent_to_device_name( $ua );
 			$raw_dir        = $this->get_raw_dir_path( $tracking_id, $url_hash ); //QA ZERO add
 
-			$readers_temp_path = $this->get_data_dir_path( 'readers/temp/' ) . $readers_name . '.php';
+			// #1642: 入口（qahm-ajax.php）でも検証しているが、パスに使う直前にも形式と保存先を確認する
+			if ( ! $this->is_valid_readers_name( $readers_name ) || ! $this->is_valid_raw_name( $raw_name ) ) {
+				throw new Exception( 'The value of $readers_name or $raw_name is invalid.' );
+			}
+			$readers_temp_path = $this->build_data_file_path( $this->get_data_dir_path( 'readers/temp/' ), $readers_name . '.php' );
+			if ( ! $readers_temp_path ) {
+				throw new Exception( 'The value of $readers_name is invalid.' );
+			}
 
 			if ( $this->wrap_exists( $readers_temp_path ) ) {
 				
@@ -534,17 +581,26 @@ class QAHM_Behavioral_Data extends QAHM_File_Data {
 				$readers_data = $this->wrap_get_contents( $readers_temp_path );
 
 				$readers_data_ary = $this->wrap_unserialize( $readers_data );
-				$is_reject_temp = $readers_data_ary['head']['is_reject'];
-				$readers_data_ary['head']['is_reject'] = $is_cookie_reject;
+				// #1642: 読み込み結果がセッションデータの形でなければ書き戻さない
+				// （読めなかったファイルを is_reject だけの中身で上書きしない）
+				if ( is_array( $readers_data_ary ) && isset( $readers_data_ary['head'] ) && is_array( $readers_data_ary['head'] ) ) {
+					$is_reject_temp = $readers_data_ary['head']['is_reject'];
+					$readers_data_ary['head']['is_reject'] = $is_cookie_reject;
 
-			 	if ( $qahm_time->now_unixtime() - $lastmodunix > 30 || $is_reject_temp != $is_cookie_reject ) {
-			 		$this->wrap_put_contents( $readers_temp_path, $this->wrap_serialize( $readers_data_ary ) );
-			 	}
+				 	if ( $qahm_time->now_unixtime() - $lastmodunix > 30 || $is_reject_temp != $is_cookie_reject ) {
+				 		$this->wrap_put_contents( $readers_temp_path, $this->wrap_serialize( $readers_data_ary ) );
+				 	}
+				}
 			}
 
 			// validate
 			if ( ! $raw_dir ) {
 				throw new Exception( 'Failed to specify the directory for raw data.' );
+			}
+
+			// #1642: 生データの保存先を確認する。-p / -c / -e / -g は接尾辞が違うだけなので代表の -p で確認する
+			if ( ! $this->build_data_file_path( $raw_dir, $raw_name . '-p.php' ) ) {
+				throw new Exception( 'The value of $raw_name is invalid.' );
 			}
 
 			$output = 'output data /';
@@ -825,6 +881,16 @@ class QAHM_Behavioral_Data extends QAHM_File_Data {
 				$dLevent_path = $raw_dir . $raw_name . '-g' . '.php';
 				$dLevent_ary     = json_decode( $this->wrap_filter_input( INPUT_POST, 'dlevent_ary' ), true );
 				$dLevent_ver     = $this->wrap_filter_input( INPUT_POST, 'dlevent_ver' );
+				// #1642: 他の版番号（pos_ver / click_ver / event_ver）と同じく数値にする。
+				// 現行の形式は 1 のみ（qtag.js が固定で送る）なので、それ以外は受け付けない
+				if ( ! $dLevent_ver ) {
+					$dLevent_ver = 1;
+				} else {
+					$dLevent_ver = (int) $dLevent_ver;
+				}
+				if ( $dLevent_ver !== 1 ) {
+					throw new Exception( 'The value of $dLevent_ver is invalid.' );
+				}
 				$dLevent_head = array(
 					array(
 						self::DATA_HEADER_VERSION            => $dLevent_ver,

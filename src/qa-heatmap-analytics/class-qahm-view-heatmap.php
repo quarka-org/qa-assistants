@@ -40,6 +40,99 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	}
 
 	/**
+	 * ヒートマップの期間（start_date / end_date）の形式を検証する。#1643
+	 *
+	 * 作業ファイル名に入るため、画面が作る形式（Y-m-d H:i:s）の実在する日時だけを受け付ける。
+	 * 送り元は admin-page-behavior.js / admin-page-goals.js / heatmap-bar.js と
+	 * ページ分析アシスタントのリンクで、どれもこの形式。
+	 *
+	 * @param mixed $datetime 検証する値。
+	 * @return bool 形式に合えば true。
+	 */
+	public function is_valid_heatmap_datetime( $datetime ) {
+		// DateTime::createFromFormat() は NUL バイトを含む文字列で ValueError を投げる（PHP 8）ため使わず、
+		// 区切りの位置と数字を1つずつ確かめる（#1642 の is_valid_ymd_str() と同じ考え方）
+		if ( ! is_string( $datetime ) || strlen( $datetime ) !== 19 ||
+			'-' !== $datetime[4] || '-' !== $datetime[7] || ' ' !== $datetime[10] || ':' !== $datetime[13] || ':' !== $datetime[16] ) {
+			return false;
+		}
+
+		$year   = substr( $datetime, 0, 4 );
+		$month  = substr( $datetime, 5, 2 );
+		$day    = substr( $datetime, 8, 2 );
+		$hour   = substr( $datetime, 11, 2 );
+		$minute = substr( $datetime, 14, 2 );
+		$second = substr( $datetime, 17, 2 );
+		foreach ( array( $year, $month, $day, $hour, $minute, $second ) as $part ) {
+			if ( ! ctype_digit( $part ) ) {
+				return false;
+			}
+		}
+
+		return checkdate( (int) $month, (int) $day, (int) $year )
+			&& (int) $hour <= 23 && (int) $minute <= 59 && (int) $second <= 59;
+	}
+
+	/**
+	 * ヒートマップの tracking_id を検証する。#1643
+	 *
+	 * 作業ファイル名とデータの読み込み先に入るため、登録済みの値か 'all' だけを受け付ける。
+	 * get_safe_tracking_id() は不正な値を 'all' に置き換えて処理を続けるため、ここでは使わない。
+	 * validate_tracking_id() も、empty() が true になる値（'0' など）を有効として通すため使わず、
+	 * 登録済みの一覧と直接照合する。
+	 *
+	 * @param mixed $tracking_id 検証する値。
+	 * @return bool 登録済みか 'all' なら true。
+	 */
+	public function is_valid_heatmap_tracking_id( $tracking_id ) {
+		if ( ! is_string( $tracking_id ) || '' === $tracking_id ) {
+			return false;
+		}
+
+		return 'all' === $tracking_id || in_array( $tracking_id, (array) $this->get_valid_tracking_ids_with_cache(), true );
+	}
+
+	/**
+	 * ヒートマップの is_landing_page を検証する。#1643
+	 *
+	 * 画面は 0 か 1 だけを送る（data-is_landing_page 属性）。
+	 *
+	 * @param mixed $flag 検証する値。
+	 * @return bool 0 / 1（数値または文字列）なら true。
+	 */
+	public function is_valid_heatmap_landing_flag( $flag ) {
+		return in_array( $flag, array( 0, 1, '0', '1' ), true );
+	}
+
+	/**
+	 * ヒートマップの作業ファイル名（file_base_name）の形式を検証する。#1643
+	 *
+	 * 形式は {version_id}_{YmdHis}_{YmdHis}_{0|1}_{tracking_id}（create_heatmap_file() が作る名前）。
+	 * 画面から送り返された値をそのまま作業ファイルのパスに使うため、形式に合わない名前は通さない。
+	 *
+	 * @param mixed $name 検証する名前。
+	 * @return bool 形式に合えば true。
+	 */
+	public function is_valid_heatmap_file_base_name( $name ) {
+		if ( ! is_string( $name ) ) {
+			return false;
+		}
+
+		// tracking_id に「_」が含まれても崩れないよう、先頭から4つだけ区切る
+		$parts = explode( '_', $name, 5 );
+		if ( count( $parts ) !== 5 ) {
+			return false;
+		}
+
+		$version_id_len = strlen( $parts[0] );
+		return $version_id_len >= 1 && $version_id_len <= 10 && ctype_digit( $parts[0] )
+			&& strlen( $parts[1] ) === 14 && ctype_digit( $parts[1] )
+			&& strlen( $parts[2] ) === 14 && ctype_digit( $parts[2] )
+			&& $this->is_valid_heatmap_landing_flag( $parts[3] )
+			&& $this->is_valid_heatmap_tracking_id( $parts[4] );
+	}
+
+	/**
 	 * P7-D Phase 1 (#1466): ヒートマップ Step6 の PV メタを allpv 列DB（QAL 経路）から取得する。
 	 *
 	 * native 列のみを storage から取得（マスター参照列を混ぜないためフォールバックしない）し、utm 系は
@@ -182,10 +275,28 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 	public function ajax_create_heatmap_file() {
 		global $qahm_log;
 
+		// #1643: 呼び出し元（cap-create.js）は失敗時の処理を持たず、URL でない応答を alert する。
+		// そのため 403 ではなく、今のエラー応答と同じ「メッセージ文字列の JSON」で返す
+		if ( ! $this->verify_ajax_request() ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
+			echo $this->wrap_json_encode( __( 'You do not have sufficient permissions to access this page.', 'qa-heatmap-analytics' ) );
+			die();
+		}
+
 		try {
 			$start_date      = $this->wrap_filter_input( INPUT_POST, 'start_date' );
 			$end_date        = $this->wrap_filter_input( INPUT_POST, 'end_date' );
 			$tracking_id     = $this->wrap_filter_input( INPUT_POST, 'tracking_id' );
+			$is_landing_page = $this->wrap_filter_input( INPUT_POST, 'is_landing_page' );
+			// #1643: 作業ファイル名に入る値は、画面が作る形式だけを受け付ける
+			if ( ! $this->is_valid_heatmap_datetime( $start_date ) || ! $this->is_valid_heatmap_datetime( $end_date ) ||
+				! $this->is_valid_heatmap_tracking_id( $tracking_id ) || ! $this->is_valid_heatmap_landing_flag( $is_landing_page ) ) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
+				echo $this->wrap_json_encode( 'Invalid parameter.' );
+				die();
+			}
+			$is_landing_page = (int) $is_landing_page;
+
 			$page_id         = (int) $this->wrap_filter_input( INPUT_POST, 'page_id' );
 			$device_name     = $this->wrap_filter_input( INPUT_POST, 'device_name' );
 			$device_id       = $this->device_name_to_device_id( $device_name );
@@ -196,7 +307,6 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 				die();
 			}
 
-			$is_landing_page = $this->wrap_filter_input( INPUT_POST, 'is_landing_page' );
 			$media           = $this->wrap_filter_input( INPUT_POST, 'media' );
 			$goal            = $this->wrap_filter_input( INPUT_POST, 'goal' );
 
@@ -284,6 +394,14 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		global $qahm_log;
 		global $qahm_time;
 
+		// #1643: 呼び出し元でも検証しているが、作業ファイル名に使う直前にも確認する
+		if ( ! $this->is_valid_heatmap_datetime( $start_date ) || ! $this->is_valid_heatmap_datetime( $end_date ) ||
+			! $this->is_valid_heatmap_tracking_id( $tracking_id ) || ! $this->is_valid_heatmap_landing_flag( $is_landing_page ) ) {
+			return null;
+		}
+		$version_id      = (int) $version_id;
+		$is_landing_page = (int) $is_landing_page;
+
 		$file_base_name = $version_id . '_' . str_replace( array( ' ', ':', '-' ), '', $start_date ) . '_' . str_replace( array( ' ', ':', '-' ), '', $end_date ) . '_' . $is_landing_page . '_' . $tracking_id;
 
 		//ゴールセッションを取得
@@ -302,6 +420,10 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		//ヒートマップ用の一時ファイル保存先
 		$heatmap_view_work_dir = $this->get_data_dir_path( 'heatmap-view-work' );
 		$this->wrap_mkdir( $heatmap_view_work_dir );
+		// #1643: 作業ファイルは -cap / -info / -merge-* と接尾辞が違うだけなので、代表の -info で保存先を確認する
+		if ( ! $this->build_data_file_path( $heatmap_view_work_dir, $file_base_name . '-info.php' ) ) {
+			return null;
+		}
 
 		// base.htmlをdbから取得
 		$base_html            = null;
@@ -1120,6 +1242,11 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 
 	// ヒートマップ表示画面上で必要な初期情報を取得
 	public function ajax_init_heatmap_view() {
+		// #1643: 呼び出し元（heatmap-main.js）は失敗時の処理を持つので 403 で返す
+		if ( ! $this->verify_ajax_request() ) {
+			wp_die( '', '', array( 'response' => 403 ) );
+		}
+
 		$data = array();
 
 		global $wp_filesystem;
@@ -1129,6 +1256,13 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		$ver       = $this->wrap_filter_input( INPUT_POST, 'ver' );
 		$dev       = $this->wrap_filter_input( INPUT_POST, 'dev' );
 		$file_base_name = $this->wrap_filter_input( INPUT_POST, 'file_base_name' );
+
+		$heatmap_view_work_dir = $this->get_data_dir_path( 'heatmap-view-work' );
+		// #1643: 作業ファイル名は create_heatmap_file() が作る形式だけを受け付け、保存先も確認する
+		if ( ! $this->is_valid_heatmap_file_base_name( $file_base_name ) ||
+			! $this->build_data_file_path( $heatmap_view_work_dir, $file_base_name . '-info.php' ) ) {
+			wp_die( '', '', array( 'response' => 403 ) );
+		}
 
 		// cap.phpは一日ごとの更新のため、リアルタイムに変わってほしい変数や
 		// QAHMバーを初期化する際に必須の情報を受け取る
@@ -1143,8 +1277,6 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 		$data['heatmap']           = false;
 		$data['attention']         = false;
 		$data['free_rec_flag']     = false;
-
-		$heatmap_view_work_dir = $this->get_data_dir_path( 'heatmap-view-work' );
 
 		$data['merge_c']  = null;
 		$data['merge_as'] = null;
@@ -1257,7 +1389,15 @@ class QAHM_View_Heatmap extends QAHM_View_base {
 public function ajax_update_page_version() {
 	global $qahm_log;
 	global $wpdb;
-	
+
+	// #1643: サーバーにページを取得させ、バージョン履歴を書き換える処理なので、nonce と権限を確認する。
+	// 呼び出し元（heatmap-bar.js）は success:false を扱うので、今のエラー応答と同じ形で返す
+	if ( ! $this->verify_ajax_request() ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON response body for AJAX (non-HTML context).
+		echo $this->wrap_json_encode( array( 'success' => false, 'message' => __( 'You do not have sufficient permissions to access this page.', 'qa-heatmap-analytics' ) ) );
+		die();
+	}
+
 	try {
 		$page_id = (int) $this->wrap_filter_input( INPUT_POST, 'page_id' );
 		
@@ -1315,10 +1455,16 @@ public function ajax_update_page_version() {
 
 //QA ZERO
 public function ajax_get_separate_data()	{
-		// Check nonce, authentication, or any other necessary verification here.
+		// #1643: 呼び出し元（heatmap-main.js）は失敗時の処理を持つので 403 で返す
+		if ( ! $this->verify_ajax_request() ) {
+			wp_die( '', '', array( 'response' => 403 ) );
+		}
 
-		// Get the version_id from the request.
 		$file_base_name = $this->wrap_filter_input( INPUT_POST, 'file_base_name' );
+		// #1643: 作業ファイル名は create_heatmap_file() が作る形式だけを受け付ける
+		if ( ! $this->is_valid_heatmap_file_base_name( $file_base_name ) ) {
+			wp_die( '', '', array( 'response' => 403 ) );
+		}
 		$data = $this->get_separate_data( $file_base_name );
 		// Return the data as JSON.
 		wp_send_json( $data );
@@ -1334,6 +1480,11 @@ public function ajax_get_separate_data()	{
 			'merge_c' => null,
 			'merge_as' => null,
 		);
+
+		// #1643: 読み込み先が作業ディレクトリの直下かを確認する（ライブビュー経由でも同じ関数を通る）
+		if ( ! $this->build_data_file_path( $heatmap_view_work_dir, $file_base_name . '-separate-merge-c-slz.php' ) ) {
+			return $data;
+		}
 
 		// Define the file paths.
 		$merge_c_file = $heatmap_view_work_dir . $file_base_name . '-separate-merge-c-slz.php';

@@ -420,6 +420,11 @@ switch ( $action ) {
     case 'update_msec':
         //readers_name       = $base->wrap_filter_input( INPUT_POST, 'readers_name' ); QA ZERO del
         $readers_name       = $base->serialize_escape( $base->wrap_filter_input( INPUT_POST, 'readers_name' ) ); //QA ZERO add
+        // #1642: readers_name はファイルパスに使うため、サーバーが発行する形式以外は拒否する（ログは出さない）
+        if ( ! $behave->is_valid_readers_name( $readers_name ) ) {
+            http_response_code(404);
+            exit;
+        }
         $readers_body_index = (int) $base->wrap_filter_input( INPUT_POST, 'readers_body_index' );
         $speed_msec         = (int) $base->wrap_filter_input( INPUT_POST, 'speed_msec' );
         $behave->update_msec( $readers_name, $readers_body_index, $speed_msec );
@@ -442,6 +447,12 @@ switch ( $action ) {
         //QA ZERO start
         $raw_name       = $base->serialize_escape( $base->wrap_filter_input( INPUT_POST, 'raw_name' ) );
         $readers_name   = $base->serialize_escape( $base->wrap_filter_input( INPUT_POST, 'readers_name' ) );
+        // #1642: raw_name / readers_name はファイルパスに使うため、サーバーが発行する形式以外は拒否する（ログは出さない）
+        // 正規のタグでも、初期化の応答より前にページを離れると "null" が届くが、その場合もここで終了する
+        if ( ! $behave->is_valid_raw_name( $raw_name ) || ! $behave->is_valid_readers_name( $readers_name ) ) {
+            http_response_code(404);
+            exit;
+        }
         $ua             = $base->serialize_escape( $base->wrap_filter_input( INPUT_POST, 'ua' ) );
         $is_reject = $base->wrap_filter_input( INPUT_POST, 'is_reject' );
         $is_reject = ( $is_reject === 'true' ) ? true : false;

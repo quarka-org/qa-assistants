@@ -87,6 +87,54 @@ class QAHM_View_Base extends QAHM_File_Data {
 
 
 	/**
+	 * ヒートマップ・リプレイの admin-ajax で、nonce と権限をまとめて確認する。#1643
+	 *
+	 * 応答は出力しない。失敗したときの返し方は、呼び出し元の JS に合わせて各ハンドラが決める。
+	 * ※ QAHM_Admin_Page_Dashboard::verify_ajax_request() / QAHM_Admin_Page_Realtime::verify_ajax_request() と同じ処理。
+	 *   直すときは3か所とも直す。
+	 *   QAHM_Base に置かないのは、ほぼ全クラスと別配布のアシスタントに受け継がれるため。
+	 *
+	 * @param string $nonce_action nonce の action。
+	 * @param string $nonce_field  nonce を受け取る POST の項目名。
+	 * @return bool nonce が正しく、閲覧権限があれば true。
+	 */
+	protected function verify_ajax_request( $nonce_action = QAHM_Data_Api::NONCE_API, $nonce_field = 'nonce' ) {
+		$nonce = $this->wrap_filter_input( INPUT_POST, $nonce_field );
+		if ( ! is_string( $nonce ) || ! wp_verify_nonce( $nonce, $nonce_action ) ) {
+			return false;
+		}
+
+		return $this->check_access_role( 'qahm_analytics' );
+	}
+
+	/**
+	 * ディレクトリとファイル名からパスを組み立て、ディレクトリの直下に収まるかを確認する。#1643
+	 *
+	 * ヒートマップ・リプレイの作業ファイル名は画面から送られた値に由来するため、名前の形式検証に重ねて確認する。
+	 * データディレクトリをシンボリックリンクで配置している環境でも誤判定しないよう、
+	 * 基準ディレクトリと対象の親ディレクトリを両方とも realpath で正規化して比べる。
+	 * ※ QAHM_Behavioral_Data::build_data_file_path()（#1642）と同じ処理。直すときは両方直す。
+	 *   共通の親（QAHM_File_Data）に置かないのは、別配布のアシスタントにまで受け継がれるため。
+	 *
+	 * @param string $dir       基準ディレクトリ（末尾スラッシュ付き）。
+	 * @param string $file_name ファイル名。
+	 * @return string|false 直下に収まればパス、収まらなければ false。
+	 */
+	protected function build_data_file_path( $dir, $file_name ) {
+		$path     = $dir . $file_name;
+		$real_dir = realpath( $dir );
+		if ( false === $real_dir ) {
+			return false;
+		}
+
+		if ( realpath( dirname( $path ) ) !== $real_dir || basename( $path ) !== $file_name ) {
+			return false;
+		}
+
+		return $path;
+	}
+
+	/**
 	 * 特定のタグを削除したhtmlを返す
 	 * 現在は未使用
 	 */

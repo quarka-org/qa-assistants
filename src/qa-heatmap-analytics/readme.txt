@@ -3,7 +3,7 @@ Contributors: QuarkA
 Tags: analytics, assistants, heatmap, insights, privacy-friendly
 Tested up to: 7.1
 Requires at least: 5.9
-Stable tag: 5.3.0.0
+Stable tag: 5.3.0.1
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
@@ -135,6 +135,12 @@ Stay tuned for updates on the [official site](https://quarka.org/en-assistants/)
 
 
 == Changelog ==
+
+= 5.3.0.1 =
+*Release Date: October 5, 2026*
+
+- Security and internal improvements
+
 
 = 5.3.0.0 =
 *Release Date: September 8, 2026*

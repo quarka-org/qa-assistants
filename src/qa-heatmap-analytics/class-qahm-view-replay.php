@@ -37,10 +37,36 @@ class QAHM_View_Replay extends QAHM_View_Base {
 		return parent::get_data_dir_url() . 'replay-view-work/';
 	}
 
+	/**
+	 * リプレイの作業ファイル名の元（work_base_name）の形式を検証する。#1643
+	 *
+	 * 作り方は2通りある。
+	 * - 生データ経由（リアルタイム）：readers ファイル名 {qa_id}_{Y-m-d}_{番号}（cron が readers/finish に書く名前）
+	 * - DB 経由（データビューア）：pv_id（数字だけ）
+	 * 画面から送り返された値をそのまま作業ファイルのパスに使うため、形式に合わない名前は通さない。
+	 *
+	 * @param mixed $name        検証する名前。
+	 * @param bool  $allow_pv_id pv_id（DB 経由の名前）も受け付けるなら true。
+	 * @return bool 形式に合えば true。
+	 */
+	public function is_valid_replay_work_base_name( $name, $allow_pv_id = true ) {
+		if ( ! is_string( $name ) ) {
+			return false;
+		}
+
+		if ( $this->is_valid_readers_name( $name ) ) {
+			return true;
+		}
+
+		$len = strlen( $name );
+		return $allow_pv_id && $len >= 1 && $len <= 20 && ctype_digit( $name );
+	}
+
 	public function get_event_array( $work_base_name, $replay_id ) {
 		global $wp_filesystem;
-		$path = $this->get_data_dir_path( 'replay-view-work' ) . $work_base_name . '_' . $replay_id . '-e.php';
-		if ( ! $wp_filesystem->exists( $path ) ) {
+		// #1643: 読み込み先が作業ディレクトリの直下かを確認する
+		$path = $this->build_data_file_path( $this->get_data_dir_path( 'replay-view-work' ), $work_base_name . '_' . (int) $replay_id . '-e.php' );
+		if ( ! $path || ! $wp_filesystem->exists( $path ) ) {
 			return null;
 		}
 
@@ -147,6 +173,12 @@ class QAHM_View_Replay extends QAHM_View_Base {
 	 */
 	public function ajax_create_replay_file_to_raw_data() {
 		try {
+			// #1643: 呼び出し元（admin-page-realtime.js / replay-view.js）は URL でない応答をエラー扱いにするので、
+			// 今のエラー応答と同じ「error: …」の文字列で返す
+			if ( ! $this->verify_ajax_request() ) {
+				throw new Exception( 'You do not have access privileges.' );
+			}
+
 			//QA ZERO STSRT
 			$work_base_name = $this->wrap_filter_input( INPUT_POST, 'work_base_name' );
 			$replay_id      = (int) $this->wrap_filter_input( INPUT_POST, 'replay_id' );
@@ -174,6 +206,12 @@ class QAHM_View_Replay extends QAHM_View_Base {
 		//      $work_base_name    = $this->wrap_filter_input( INPUT_POST, 'work_base_name' );
 		//      $replay_id         = (int) $this->wrap_filter_input( INPUT_POST, 'replay_id' );
 		//QA ZERO END
+		// #1643: 生データ経由の名前は readers ファイル名だけ。形式と、読み込み先・保存先を確認する
+		$replay_id = (int) $replay_id;
+		if ( ! $this->is_valid_replay_work_base_name( $work_base_name, false ) || $replay_id < 1 ) {
+			throw new Exception( 'The value of $work_base_name or $replay_id is invalid.' );
+		}
+
 		$session_file_name = $work_base_name . '.php';
 		$qa_id             = strstr( $work_base_name, '_', true );
 		$work_file_name    = $work_base_name . '_' . $replay_id;
@@ -182,6 +220,10 @@ class QAHM_View_Replay extends QAHM_View_Base {
 		$replay_dir_path  = $this->get_data_dir_path( 'replay-view-work' );
 		$info_path        = $replay_dir_path . $work_file_name . '-info.php';
 		$cap_path         = $replay_dir_path . $work_file_name . '-cap.php';
+		// 作業ファイルは -info / -cap / -p / -e と接尾辞が違うだけなので、代表の -info で保存先を確認する
+		if ( ! $this->build_data_file_path( $replay_dir_path, $work_file_name . '-info.php' ) ) {
+			throw new Exception( 'The value of $work_base_name is invalid.' );
+		}
 
 		$replay_view_url  = plugin_dir_url( __FILE__ ) . 'replay-view.php' . '?';
 		$replay_view_url .= 'work_base_name=' . $work_base_name . '&';
@@ -386,6 +428,11 @@ class QAHM_View_Replay extends QAHM_View_Base {
 	 * リプレイ表示用のファイルを作成
 	 */
 	public function ajax_create_replay_file_to_data_base() {
+		// #1643: 呼び出し元（admin-page-dataviewer.js / replay-view.js）は失敗時の処理を持つので 403 で返す
+		if ( ! $this->verify_ajax_request() ) {
+			wp_die( '', '', array( 'response' => 403 ) );
+		}
+
 		try {
 
 			// 別ユーザーが同時刻、同ページ遷移数でアクセスしているケースも想定し、reader_idはaccess_timeから求めるのではなく引数で受け取る
@@ -742,7 +789,8 @@ class QAHM_View_Replay extends QAHM_View_Base {
 			// リプレイ画面本体（replay-view.php）と同じ入場条件を要求する。
 			// この関数は「指定された URL をサーバーに取りに行かせる」ため、
 			// ログインさえしていれば誰でも叩ける状態にはしない。
-			if ( ! $this->check_access_role( 'qahm_analytics' ) ) {
+			// #1643: 権限に加えて nonce も確認する（呼び出し元は .always で次へ進むので、今のエラー応答の形で返す）
+			if ( ! $this->verify_ajax_request() ) {
 				throw new Exception( 'You do not have access privileges.' );
 			}
 

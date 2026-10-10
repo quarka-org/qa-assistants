@@ -105,6 +105,7 @@ qahm.loadScreen.promise().then(
 			url: qahm.ajax_url,
 			data: {
 				'action': 'qahm_ajax_init_heatmap_view',
+				'nonce': qahm.nonce_api,
 				'type': qahm.type,
 				'id': qahm.id,
 				'ver': qahm.ver,
@@ -157,6 +158,7 @@ qahm.loadScreen.promise().then(
 			type: 'POST',
 			data: {
 				action: 'qahm_ajax_get_separate_data',
+				nonce: qahm.nonce_api,
 				file_base_name: qahm.file_base_name, // Replace this with the actual version ID
 			}
 		}
